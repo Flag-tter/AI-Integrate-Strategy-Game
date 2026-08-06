@@ -1,0 +1,3804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>World Strategy Simulator — v1 (Simulation Engine)</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --panel-alt: #1d2229;
+    --border: #2a313b;
+    --text: #d8dee6;
+    --text-dim: #8b95a3;
+    --accent: #4fa3ff;
+    --accent-dim: #2b5f8f;
+    --good: #4caf6a;
+    --bad: #e0605a;
+    --warn: #d9a441;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px; height: 100%;
+  }
+  button {
+    font-family: var(--mono); background: var(--panel-alt); color: var(--text);
+    border: 1px solid var(--border); padding: 5px 10px; cursor: pointer; border-radius: 3px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { border-color: var(--accent-dim); color: var(--accent); }
+  input, select {
+    font-family: var(--mono); background: var(--panel-alt); color: var(--text);
+    border: 1px solid var(--border); padding: 5px 8px; border-radius: 3px;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid var(--border); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  th { color: var(--text-dim); font-weight: normal; position: sticky; top: 0; background: var(--panel); }
+  tr.selectable { cursor: pointer; }
+  tr.selectable:hover { background: var(--panel-alt); }
+  tr.selected { background: #1c2735; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 6px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px;
+  }
+  .muted { color: var(--text-dim); }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  .warn { color: var(--warn); }
+  h1, h2, h3 { margin: 0 0 8px 0; font-weight: normal; }
+  h1 { font-size: 18px; color: var(--accent); }
+  h2 { font-size: 14px; }
+  h3 { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  #auth-screen {
+    max-width: 420px; margin: 80px auto; padding: 24px;
+  }
+  #auth-screen .col { margin-bottom: 10px; }
+  #auth-status { min-height: 18px; }
+
+  #game-screen { display: none; height: 100vh; flex-direction: column; }
+  #game-screen.active { display: flex; }
+  header#topbar {
+    display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap;
+  }
+  header#topbar .spacer { flex: 1; }
+  main#layout {
+    flex: 1; display: grid; grid-template-columns: 1.6fr 1fr; grid-template-rows: 1fr 260px;
+    gap: 10px; padding: 10px; overflow: hidden;
+  }
+  #panel-countries { grid-column: 1; grid-row: 1; overflow: auto; }
+  #panel-detail { grid-column: 2; grid-row: 1 / span 2; overflow: auto; }
+  #panel-history { grid-column: 1; grid-row: 2; overflow: auto; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 10px; }
+  .stat-grid div.k { color: var(--text-dim); }
+  .bar-bg { background: #0b0d10; border: 1px solid var(--border); border-radius: 2px; height: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); }
+  .log-entry { padding: 3px 0; border-bottom: 1px dotted var(--border); }
+  .log-tag {
+    display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 8px;
+    background: var(--panel-alt); color: var(--text-dim); margin-right: 6px;
+  }
+  .relation-list div { display: flex; justify-content: space-between; padding: 2px 0; }
+</style>
+</head>
+<body>
+
+<div id="auth-screen">
+  <h1>World Strategy Simulator</h1>
+  <p class="muted">A single-player world simulation engine. Sign in to create or continue a world.</p>
+  <div class="col">
+    <input id="email" type="email" placeholder="email" autocomplete="username" />
+    <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+    <div class="row">
+      <button id="btn-signup">Sign Up</button>
+      <button id="btn-login" class="primary">Log In</button>
+    </div>
+    <button id="btn-anon">Continue as Guest</button>
+  </div>
+  <p id="auth-status" class="muted"></p>
+  <p id="firebase-warning" class="warn" style="display:none;">
+    Firebase is not configured — save/load will be unavailable. Set FIREBASE_CONFIG near the top of this file
+    with your own Firebase project's credentials to enable authentication and persistence.
+  </p>
+</div>
+
+<div id="game-screen">
+  <header id="topbar">
+    <strong style="color:var(--accent)">World Strategy Simulator</strong>
+    <span id="date-display" class="muted">—</span>
+    <div class="row">
+      <button id="btn-play" class="primary">▶ Play</button>
+      <button id="btn-pause">⏸ Pause</button>
+      <select id="speed-select">
+        <option value="800">1x</option>
+        <option value="250">4x</option>
+        <option value="60">12x</option>
+      </select>
+    </div>
+    <div class="spacer"></div>
+    <button id="btn-newgame">New World</button>
+    <button id="btn-save">Save</button>
+    <button id="btn-load">Load</button>
+    <span id="save-status" class="muted"></span>
+    <span id="user-label" class="muted"></span>
+    <button id="btn-signout">Sign Out</button>
+  </header>
+
+  <main id="layout">
+    <section id="panel-countries" class="panel">
+      <h3>Nations</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Gov.</th><th>Leader</th><th>Population</th><th>GDP/cap</th>
+            <th>Stability</th><th>Unrest</th><th>Military</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="country-table-body"></tbody>
+      </table>
+    </section>
+
+    <section id="panel-detail" class="panel">
+      <h3>Nation Detail</h3>
+      <div id="detail-content" class="muted">Select a nation from the table.</div>
+    </section>
+
+    <section id="panel-history" class="panel">
+      <h3>World History</h3>
+      <div id="history-log"></div>
+    </section>
+  </main>
+</div>
+
+<script type="module">
+// =============================================================================
+// Firebase configuration
+// -----------------------------------------------------------------------------
+// Replace the values below with your own Firebase project's web app config
+// (Project Settings → General → Your apps → SDK setup and configuration).
+// Enable Email/Password and Anonymous providers under Authentication → Sign-in
+// method, and create a Cloud Firestore database in the same project.
+// =============================================================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBhG7IJ2NdOjaUMnysTxbXGZ_cDd6jL8ik",
+  authDomain: "world-strategy-game-ai-full.firebaseapp.com",
+  projectId: "world-strategy-game-ai-full",
+  storageBucket: "world-strategy-game-ai-full.firebasestorage.app",
+  messagingSenderId: "529136384078",
+  appId: "1:529136384078:web:6da13eff42606cff46eb1f",
+};
+const FIREBASE_IS_CONFIGURED = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
+
+let firebaseApp = null, auth = null, db = null;
+let fb = null; // holds imported firebase functions once loaded
+
+async function initFirebase() {
+  if (!FIREBASE_IS_CONFIGURED) {
+    document.getElementById("firebase-warning").style.display = "block";
+    return;
+  }
+  const [{ initializeApp }, authMod, fsMod] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js"),
+    import("https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js"),
+  ]);
+  firebaseApp = initializeApp(FIREBASE_CONFIG);
+  auth = authMod.getAuth(firebaseApp);
+  db = fsMod.getFirestore(firebaseApp);
+  fb = { ...authMod, ...fsMod };
+
+  fb.onAuthStateChanged(auth, (user) => {
+    if (user) {
+      onSignedIn(user);
+    } else {
+      onSignedOut();
+    }
+  });
+}
+
+// =============================================================================
+
+// =============================================================================
+// Simulation Engine (see project spec: data model, economy, population,
+// technology, military, diplomacy, AI, events, history, save/load, clock)
+// =============================================================================
+// =============================================================================
+// World Strategy Simulator — Simulation Engine (Version 1)
+// Pure logic module. No DOM, no Firebase. Deterministic-structure, stochastic
+// where the spec calls for it (events, minor variance), but every system is
+// driven by real state formulas — nothing here is a placeholder or a mock.
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (min, max) => Math.random() * (max - min) + min;
+const randInt = (min, max) => Math.floor(rand(min, max + 1));
+const uid = (prefix = "id") =>
+  `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+const weightedPick = (entries) => {
+  // entries: [[item, weight], ...]
+  const total = entries.reduce((s, [, w]) => s + Math.max(0, w), 0);
+  if (total <= 0) return entries.length ? entries[0][0] : null;
+  let r = Math.random() * total;
+  for (const [item, w] of entries) {
+    r -= Math.max(0, w);
+    if (r <= 0) return item;
+  }
+  return entries[entries.length - 1][0];
+};
+
+// ---------------------------------------------------------------------------
+// Constants / tunables — centralized so balance can be iterated on without
+// hunting through system logic.
+// ---------------------------------------------------------------------------
+const CONFIG = {
+  TICKS_PER_YEAR: 12, // one tick = one in-game month
+  BASE_POP_GROWTH_MONTHLY: 0.0015, // 1.8%/yr baseline before modifiers
+  BASE_TAX_RATE: 0.22,
+  DEBT_INTEREST_MONTHLY: 0.006,
+  RESEARCH_TECH_THRESHOLD: 1000, // research points to advance a tech level point
+  MAX_TECH_LEVEL: 100,
+  RELATION_DRIFT_TO_NEUTRAL: 0.6, // per-tick drift magnitude toward 0
+  WAR_EXHAUSTION_PEACE_THRESHOLD: 72,
+  UNREST_REVOLUTION_THRESHOLD: 82,
+  UNREST_REVOLUTION_TICKS: 6, // consecutive ticks above threshold before revolution
+  AI_ACTIONS_PER_TICK: 2,
+  DISASTER_BASE_CHANCE: 0.006, // per country per tick, modified by geography
+  HISTORY_CAP_GLOBAL: 4000,
+  HISTORY_CAP_COUNTRY: 800,
+  // --- Leadership subsystem tunables ---
+  LEADER_TERM_TICKS: 48, // 4 in-game years between elections for electoral governments
+  LEADER_APPROVAL_DRIFT_RATE: 0.08, // fraction of the gap to the target approval closed per tick
+  LEADER_MAX_HISTORY: 20, // succession records retained per nation
+  // --- Diplomacy subsystem tunables (treaties, defense pacts, sanctions) ---
+  // Defense pacts are a deeper, later-stage commitment than a plain alliance
+  // — they require an existing alliance first and a higher relation bar.
+  DEFENSE_PACT_REQUIRED_RELATION: 60,
+  DEFENSE_PACT_RELATION_BONUS: 0.7, // per-tick upkeep bonus, stronger than alliance's 0.5
+  // When a defender in a defensive war has defense-pact partners, each
+  // partner independently decides (relation, strength, personality, gov
+  // posture) whether to open its own war against the aggressor.
+  DEFENSE_PACT_JOIN_BASE_CHANCE: 0.4,
+  DEFENSE_PACT_HONOR_RELATION_BONUS: 8,
+  DEFENSE_PACT_DECLINE_RELATION_PENALTY: -12,
+  // Sanctions: a real, imposed economic-pressure tool short of war. They cut
+  // (not fully sever) bilateral trade efficiency, apply an immediate and an
+  // ongoing relations cost, and scale a broader GDP penalty on the target
+  // with how many nations are sanctioning it at once (financial/reputational
+  // isolation beyond just the bilateral trade lost).
+  SANCTION_INITIAL_RELATION_PENALTY: -10,
+  SANCTION_UPKEEP_RELATION_DRAG: -0.1, // ongoing per-tick drag while active
+  SANCTION_TRADE_EFFICIENCY_MULT: 0.15, // surviving fraction of route efficiency
+  SANCTION_GDP_PENALTY_PER: 0.035, // GDP/capita multiplier lost per sanctioning nation
+  SANCTION_GDP_PENALTY_MAX: 0.25, // cap on cumulative sanction GDP penalty
+  SANCTION_LIFT_RELATION_THRESHOLD: 25, // relation level at which lifting starts to look attractive
+};
+
+const GOVERNMENTS = [
+  "Republic",
+  "Federation",
+  "Autocracy",
+  "Technocracy",
+  "Monarchy",
+  "Democracy",
+  "Constitutional Monarchy",
+  "Communist State",
+  "Military Junta",
+  "Dictatorship",
+];
+
+// ---------------------------------------------------------------------------
+// Government profiles — the behavioral core of the governance subsystem.
+// -----------------------------------------------------------------------------
+// A government type is not a label; it is a bundle of structural biases that
+// every downstream system (population/stability, technology, the AI decision
+// engine, and the revolution/succession pipeline) reads from directly. This
+// is what makes governments behave differently rather than just nudging a
+// single baseline number:
+//
+//   stabilityBaseline    — long-run stability the nation regresses toward.
+//   stabilityRegression  — multiplier on how fast it regresses there (tight
+//                           authoritarian control snaps back quickly; loose
+//                           pluralistic systems drift more slowly).
+//   suppression           — 0..1, how much of a nation's visible unrest a
+//                           regime can forcibly compress each tick through
+//                           coercion rather than addressing its causes. This
+//                           is a real mechanic (see PopulationSystem): every
+//                           point suppressed is banked as suppressedPressure,
+//                           which leaks back out as unrest over time and
+//                           amplifies the severity of the eventual
+//                           revolution. Authoritarian regimes look calm in
+//                           the short run and pay for it later — they don't
+//                           just have a static "less unrest" modifier.
+//   budgetBias            — additive pressure applied on top of the normal
+//                           personality-driven budget pressures in
+//                           AIDecisionEngine, so e.g. a Military Junta
+//                           structurally chases military spending regardless
+//                           of that nation's individual personality roll.
+//   warBias / diplomacyBias — additive pressure on the AI's war-declaration
+//                           and treaty-seeking scores; captures each regime
+//                           type's default posture toward the outside world.
+//   techFocus              — additive weight on top of TechnologySystem's
+//                           per-category research weights.
+//   revolutionTargets      — weighted list of plausible successor government
+//                           types when this regime is toppled by sustained
+//                           unrest. Transitions follow real political
+//                           trajectories (a Constitutional Monarchy tends
+//                           toward full Democracy or Republic, not straight
+//                           to Military Junta) instead of a uniform random
+//                           pick across all government types.
+//   description            — short human-readable trait summary for the UI.
+// ---------------------------------------------------------------------------
+const GOVERNMENT_PROFILES = {
+  Republic: {
+    stabilityBaseline: 62,
+    stabilityRegression: 1.0,
+    suppression: 0.05,
+    electoral: true,
+    budgetBias: { military: 0, research: 0.05, infrastructure: 0.05, welfare: 0.05 },
+    warBias: -0.05,
+    diplomacyBias: 0.05,
+    techFocus: { economic: 0.1 },
+    revolutionTargets: [["Democracy", 3], ["Federation", 2], ["Military Junta", 1], ["Dictatorship", 1]],
+    description: "Elected representative rule — moderate, balanced priorities.",
+  },
+  Federation: {
+    stabilityBaseline: 58,
+    stabilityRegression: 0.9,
+    suppression: 0.03,
+    electoral: true,
+    budgetBias: { military: 0, research: 0.05, infrastructure: 0.1, welfare: 0 },
+    warBias: -0.1,
+    diplomacyBias: 0.15,
+    techFocus: { industrial: 0.1 },
+    revolutionTargets: [["Republic", 2], ["Democracy", 2], ["Communist State", 1], ["Military Junta", 1]],
+    description: "Decentralized union of member states — diplomacy- and infrastructure-leaning.",
+  },
+  Autocracy: {
+    stabilityBaseline: 55,
+    stabilityRegression: 1.1,
+    suppression: 0.35,
+    electoral: false,
+    budgetBias: { military: 0.15, research: 0, infrastructure: 0, welfare: -0.05 },
+    warBias: 0.15,
+    diplomacyBias: -0.1,
+    techFocus: { military: 0.1 },
+    revolutionTargets: [["Dictatorship", 3], ["Military Junta", 3], ["Republic", 1], ["Communist State", 1]],
+    description: "Centralized personal rule — military-leaning, moderate coercion.",
+  },
+  Technocracy: {
+    stabilityBaseline: 64,
+    stabilityRegression: 0.85,
+    suppression: 0.05,
+    electoral: false,
+    budgetBias: { military: -0.05, research: 0.2, infrastructure: 0.05, welfare: 0.05 },
+    warBias: -0.15,
+    diplomacyBias: 0.1,
+    techFocus: { economic: 0.4, industrial: 0.1 },
+    revolutionTargets: [["Republic", 2], ["Democracy", 2], ["Communist State", 1]],
+    description: "Expert-administered technocracy — research- and economy-obsessed, war-averse.",
+  },
+  Monarchy: {
+    stabilityBaseline: 60,
+    stabilityRegression: 1.0,
+    suppression: 0.25,
+    electoral: false,
+    budgetBias: { military: 0.05, research: -0.05, infrastructure: 0.05, welfare: 0.05 },
+    warBias: 0.05,
+    diplomacyBias: -0.05,
+    techFocus: {},
+    revolutionTargets: [["Constitutional Monarchy", 3], ["Republic", 2], ["Dictatorship", 1], ["Military Junta", 1]],
+    description: "Hereditary absolute rule — traditional, moderate coercion.",
+  },
+  Democracy: {
+    stabilityBaseline: 60,
+    stabilityRegression: 0.8,
+    suppression: 0.0,
+    electoral: true,
+    budgetBias: { military: -0.1, research: 0.05, infrastructure: 0, welfare: 0.15 },
+    warBias: -0.25,
+    diplomacyBias: 0.25,
+    techFocus: { medical: 0.1, economic: 0.1 },
+    revolutionTargets: [["Republic", 2], ["Federation", 2], ["Military Junta", 1], ["Dictatorship", 1]],
+    description: "Broad civic participation — welfare- and diplomacy-heavy, structurally war-averse, cannot suppress unrest.",
+  },
+  "Constitutional Monarchy": {
+    stabilityBaseline: 66,
+    stabilityRegression: 0.85,
+    suppression: 0.05,
+    electoral: true,
+    budgetBias: { military: -0.05, research: 0, infrastructure: 0.05, welfare: 0.1 },
+    warBias: -0.15,
+    diplomacyBias: 0.15,
+    techFocus: { economic: 0.1 },
+    revolutionTargets: [["Democracy", 3], ["Republic", 2], ["Monarchy", 1]],
+    description: "Ceremonial monarch under an elected government — highly stable, diplomatic.",
+  },
+  "Communist State": {
+    stabilityBaseline: 58,
+    stabilityRegression: 1.15,
+    suppression: 0.4,
+    electoral: false,
+    budgetBias: { military: 0.1, research: -0.05, infrastructure: 0.15, welfare: 0.05 },
+    warBias: 0.05,
+    diplomacyBias: -0.2,
+    techFocus: { industrial: 0.4 },
+    revolutionTargets: [["Dictatorship", 2], ["Military Junta", 2], ["Republic", 2], ["Democracy", 1]],
+    description: "Centrally planned single-party state — industrial focus, heavy suppression, isolationist.",
+  },
+  "Military Junta": {
+    stabilityBaseline: 50,
+    stabilityRegression: 1.3,
+    suppression: 0.45,
+    electoral: false,
+    budgetBias: { military: 0.3, research: -0.05, infrastructure: 0, welfare: -0.1 },
+    warBias: 0.3,
+    diplomacyBias: -0.25,
+    techFocus: { military: 0.3 },
+    revolutionTargets: [["Dictatorship", 3], ["Autocracy", 2], ["Republic", 1], ["Democracy", 1]],
+    description: "Armed-forces rule — heavily militarized, coercive, structurally unstable.",
+  },
+  Dictatorship: {
+    stabilityBaseline: 52,
+    stabilityRegression: 1.2,
+    suppression: 0.5,
+    electoral: false,
+    budgetBias: { military: 0.2, research: 0, infrastructure: 0, welfare: -0.1 },
+    warBias: 0.25,
+    diplomacyBias: -0.3,
+    techFocus: { military: 0.15 },
+    revolutionTargets: [["Military Junta", 2], ["Republic", 2], ["Democracy", 1], ["Communist State", 1]],
+    description: "Personalist absolute rule — maximal coercion, unpredictable and war-prone.",
+  },
+};
+
+// Fallback profile for any unrecognized/legacy government string in old save
+// data, so nothing in the systems below has to null-check GOVERNMENT_PROFILES
+// lookups individually.
+const DEFAULT_GOVERNMENT_PROFILE = {
+  stabilityBaseline: 60,
+  stabilityRegression: 1.0,
+  suppression: 0.1,
+  electoral: false,
+  budgetBias: { military: 0, research: 0, infrastructure: 0, welfare: 0 },
+  warBias: 0,
+  diplomacyBias: 0,
+  techFocus: {},
+  revolutionTargets: GOVERNMENTS.map((g) => [g, 1]),
+  description: "",
+};
+
+function govProfile(governmentName) {
+  return GOVERNMENT_PROFILES[governmentName] ?? DEFAULT_GOVERNMENT_PROFILE;
+}
+
+// ---------------------------------------------------------------------------
+// Leadership subsystem — individual leaders with real personalities.
+// -----------------------------------------------------------------------------
+// A leader is not a flat stat bonus layered on top of the nation. Each leader
+// is assigned an *archetype* (see LEADER_ARCHETYPES) that supplies a bundle
+// of decision-reshaping functions ("think" hooks) which AIDecisionEngine
+// calls directly when it scores and gates candidate actions — the same way
+// GOVERNMENT_PROFILES supplies structural biases, but at the level of how
+// the reasoning is carried out rather than a single additive number:
+//
+//   warScore(country, other, world, baseScore, traits)      — reshapes the
+//       score for a potential war, e.g. an Ideologue inverts the sign
+//       depending on whether the target shares its government family.
+//   warGate(country, other, world, traits)                  — a hard
+//       yes/no filter evaluated *before* a war candidate is even generated;
+//       a Statesman or Guardian can rule out wars of choice entirely rather
+//       than merely scoring them low.
+//   peaceThreshold(country, war, traits)                    — replaces the
+//       flat CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD with a per-leader value,
+//       so a Hawk fights on long after a Steward would sue for peace.
+//   treatyScore(country, other, type, baseScore, traits)    — reshapes
+//       treaty-seeking behavior per treaty type.
+//   budgetPressure(country, category, basePressure, traits) — reshapes
+//       budget-category pressure beyond the government's static budgetBias.
+//   doctrine(country, traits)                                — can force a
+//       preferred military doctrine regardless of the personality-derived
+//       default.
+//
+// Any hook a given archetype omits simply leaves the underlying system's
+// existing behavior untouched (see the `?.` call sites in AIDecisionEngine).
+// Individual leaders roll their own traits within the archetype's ranges, so
+// two Hawks are never mechanically identical.
+// ---------------------------------------------------------------------------
+const GOVERNMENT_FAMILIES = {
+  Republic: "liberal",
+  Federation: "liberal",
+  Democracy: "liberal",
+  "Constitutional Monarchy": "liberal",
+  Autocracy: "authoritarian",
+  Dictatorship: "authoritarian",
+  "Military Junta": "authoritarian",
+  "Communist State": "authoritarian",
+  Monarchy: "traditional",
+  Technocracy: "technocratic",
+};
+function governmentFamily(governmentName) {
+  return GOVERNMENT_FAMILIES[governmentName] ?? "other";
+}
+
+const LEADER_ARCHETYPES = {
+  warhawk: {
+    title: "The Hawk",
+    description: "Treats strength as the only currency that matters and diplomacy as a stalling tactic.",
+    traitRanges: { boldness: [0.65, 0.95], caution: [0.05, 0.3], pragmatism: [0.2, 0.5], ideology: [0.2, 0.6], ruthlessness: [0.6, 0.95], charisma: [0.3, 0.7] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore + traits.boldness * 0.35 + traits.ruthlessness * 0.2;
+      },
+      peaceThreshold(country, war, traits) {
+        // Fights on well past the point a cautious leader would settle.
+        return CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD + (1 - traits.caution) * 20;
+      },
+      treatyScore(country, other, type, baseScore, traits) {
+        return type === "alliance" ? baseScore - traits.ruthlessness * 0.15 : baseScore;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        return category === "military" ? basePressure + traits.boldness * 0.25 : basePressure;
+      },
+      doctrine() { return "Offensive"; },
+    },
+  },
+  statesman: {
+    title: "The Statesman",
+    description: "Believes wars of choice are failures of diplomacy and will exhaust every treaty option first.",
+    traitRanges: { boldness: [0.1, 0.4], caution: [0.55, 0.9], pragmatism: [0.5, 0.8], ideology: [0.1, 0.4], ruthlessness: [0.05, 0.3], charisma: [0.5, 0.9] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore - traits.caution * 0.5 - traits.charisma * 0.1;
+      },
+      warGate(country, other, world, traits) {
+        // Will only ever strike a target that is both far weaker and
+        // already openly hostile — diplomacy is preferred otherwise.
+        const relation = country.relationWith(other.id);
+        const ratio = country.military.strength / Math.max(1, other.military.strength);
+        return relation < -60 && ratio > 1.8;
+      },
+      peaceThreshold(country, war, traits) {
+        return CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD - traits.caution * 25;
+      },
+      treatyScore(country, other, type, baseScore, traits) {
+        return baseScore + traits.charisma * 0.3 + traits.pragmatism * 0.2;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        return category === "military" ? basePressure - traits.caution * 0.15 : basePressure;
+      },
+      doctrine() { return "Defensive"; },
+    },
+  },
+  ideologue: {
+    title: "The Ideologue",
+    description: "Views the world through the lens of governmental kinship — natural allies and natural enemies.",
+    traitRanges: { boldness: [0.4, 0.75], caution: [0.2, 0.5], pragmatism: [0.05, 0.3], ideology: [0.7, 0.98], ruthlessness: [0.4, 0.75], charisma: [0.4, 0.8] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        const sameFamily = governmentFamily(country.government) === governmentFamily(other.government);
+        return baseScore + (sameFamily ? -traits.ideology * 0.6 : traits.ideology * 0.55);
+      },
+      warGate(country, other, world, traits) {
+        // Never turns on a nation that shares its ideological family, no
+        // matter how favorable the numbers look.
+        return governmentFamily(country.government) !== governmentFamily(other.government);
+      },
+      treatyScore(country, other, type, baseScore, traits) {
+        const sameFamily = governmentFamily(country.government) === governmentFamily(other.government);
+        return baseScore + (sameFamily ? traits.ideology * 0.4 : -traits.ideology * 0.5);
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        return category === "research" ? basePressure - traits.ideology * 0.1 : basePressure;
+      },
+    },
+  },
+  schemer: {
+    title: "The Schemer",
+    description: "An opportunist who reads the balance of power tick by tick and strikes wherever it tilts favorably.",
+    traitRanges: { boldness: [0.5, 0.8], caution: [0.15, 0.45], pragmatism: [0.6, 0.9], ideology: [0.05, 0.3], ruthlessness: [0.55, 0.85], charisma: [0.3, 0.65] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        const strengthRatio = country.military.strength / Math.max(1, other.military.strength);
+        return baseScore + traits.pragmatism * clamp(strengthRatio - 1, 0, 2) * 0.4 + traits.ruthlessness * 0.15;
+      },
+      treatyScore(country, other, type, baseScore, traits) {
+        return type === "non-aggression" ? baseScore + traits.pragmatism * 0.2 : baseScore - traits.ruthlessness * 0.1;
+      },
+    },
+  },
+  steward: {
+    title: "The Steward",
+    description: "Cautious by temperament — will not gamble the nation on a fight without an overwhelming edge.",
+    traitRanges: { boldness: [0.1, 0.35], caution: [0.65, 0.95], pragmatism: [0.55, 0.85], ideology: [0.1, 0.35], ruthlessness: [0.05, 0.25], charisma: [0.4, 0.7] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore - traits.caution * 0.6;
+      },
+      warGate(country, other, world, traits) {
+        const ratio = country.military.strength / Math.max(1, other.military.strength);
+        return ratio > 1.6 && country.population.stability > 55;
+      },
+      peaceThreshold(country, war, traits) {
+        return CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD - traits.caution * 30;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        if (category === "welfare" || category === "infrastructure") return basePressure + traits.caution * 0.15;
+        if (category === "military") return basePressure - traits.caution * 0.15;
+        return basePressure;
+      },
+      doctrine() { return "Defensive"; },
+    },
+  },
+  reformer: {
+    title: "The Reformer",
+    description: "A technocratic mind that treats military spending as an opportunity cost against research.",
+    traitRanges: { boldness: [0.2, 0.5], caution: [0.4, 0.7], pragmatism: [0.7, 0.95], ideology: [0.1, 0.35], ruthlessness: [0.1, 0.35], charisma: [0.35, 0.65] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore - traits.pragmatism * 0.5;
+      },
+      warGate(country, other, world, traits) {
+        return country.relationWith(other.id) < -50;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        return category === "research" ? basePressure + traits.pragmatism * 0.3 : basePressure;
+      },
+    },
+  },
+  guardian: {
+    title: "The Guardian",
+    description: "Purely reactive on foreign policy — defends its borders fiercely but never fights beyond them.",
+    traitRanges: { boldness: [0.15, 0.4], caution: [0.5, 0.8], pragmatism: [0.3, 0.6], ideology: [0.2, 0.5], ruthlessness: [0.2, 0.5], charisma: [0.2, 0.5] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore - traits.caution * 0.4;
+      },
+      warGate(country, other, world, traits) {
+        return country.geography.neighbors.includes(other.id) && country.relationWith(other.id) < -55;
+      },
+      treatyScore(country, other, type, baseScore, traits) {
+        return type === "non-aggression" ? baseScore + traits.caution * 0.25 : baseScore - traits.caution * 0.3;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        return category === "infrastructure" ? basePressure + traits.caution * 0.1 : basePressure;
+      },
+    },
+  },
+  firebrand: {
+    title: "The Firebrand",
+    description: "A populist who reaches for a foreign fight whenever the mood at home turns sour.",
+    traitRanges: { boldness: [0.45, 0.8], caution: [0.15, 0.4], pragmatism: [0.25, 0.55], ideology: [0.35, 0.7], ruthlessness: [0.35, 0.65], charisma: [0.65, 0.98] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        // Rally-round-the-flag: the worse domestic stability gets, the more
+        // this leader wants a foreign distraction.
+        const distraction = country.population.stability < 45 ? (45 - country.population.stability) * 0.02 : 0;
+        return baseScore + traits.charisma * 0.2 + distraction;
+      },
+      peaceThreshold() {
+        return CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD - 15;
+      },
+      budgetPressure(country, category, basePressure, traits) {
+        if (category === "welfare") return basePressure + traits.charisma * 0.2;
+        if (category === "military") return basePressure + traits.boldness * 0.15;
+        return basePressure;
+      },
+    },
+  },
+  balancer: {
+    title: "The Balancer",
+    description: "A pragmatic centrist with no strong pull toward any extreme — governs close to the national baseline.",
+    traitRanges: { boldness: [0.3, 0.6], caution: [0.35, 0.65], pragmatism: [0.5, 0.8], ideology: [0.15, 0.45], ruthlessness: [0.25, 0.55], charisma: [0.4, 0.7] },
+    think: {
+      warScore(country, other, world, baseScore, traits) {
+        return baseScore + (traits.pragmatism - 0.5) * 0.15;
+      },
+    },
+  },
+};
+
+// Weighted archetype pool per government type — mirrors the shape of
+// GOVERNMENT_PROFILES.revolutionTargets. A Military Junta is far likelier to
+// produce a Hawk or Firebrand than a Statesman; a Democracy is the reverse.
+const LEADER_ARCHETYPE_AFFINITY = {
+  Republic: [["statesman", 3], ["balancer", 3], ["reformer", 2], ["schemer", 1]],
+  Federation: [["statesman", 3], ["balancer", 3], ["guardian", 2], ["reformer", 1]],
+  Autocracy: [["warhawk", 3], ["schemer", 3], ["ideologue", 2], ["firebrand", 1]],
+  Technocracy: [["reformer", 4], ["balancer", 2], ["statesman", 2]],
+  Monarchy: [["steward", 3], ["guardian", 2], ["balancer", 2], ["warhawk", 1]],
+  Democracy: [["statesman", 4], ["balancer", 3], ["reformer", 2]],
+  "Constitutional Monarchy": [["statesman", 3], ["steward", 2], ["balancer", 2]],
+  "Communist State": [["ideologue", 4], ["warhawk", 2], ["firebrand", 2]],
+  "Military Junta": [["warhawk", 4], ["firebrand", 2], ["schemer", 2]],
+  Dictatorship: [["warhawk", 3], ["schemer", 3], ["ideologue", 2], ["firebrand", 2]],
+};
+function pickArchetypeFor(country) {
+  const pool = LEADER_ARCHETYPE_AFFINITY[country.government]
+    ?? Object.keys(LEADER_ARCHETYPES).map((k) => [k, 1]);
+  return weightedPick(pool);
+}
+
+const LEADER_FIRST_NAMES = [
+  "Aren", "Bryn", "Corvin", "Dessa", "Elric", "Fenna", "Garrick", "Halvar",
+  "Iona", "Jarek", "Kessa", "Lorin", "Maren", "Nils", "Orla", "Petran",
+  "Quenna", "Rasvel", "Sorin", "Tamsin", "Ulf", "Vesna", "Wren", "Xandra",
+  "Ylva", "Zoran",
+];
+const LEADER_LAST_NAMES = [
+  "Voss", "Kade", "Marek", "Sten", "Halloran", "Brecht", "Dorne", "Ashgrove",
+  "Kellan", "Novak", "Ravensworth", "Tarrow", "Vantor", "Wexley", "Ostrand",
+  "Corvane", "Drayce", "Fenwick",
+];
+function generateLeaderName() {
+  const first = LEADER_FIRST_NAMES[randInt(0, LEADER_FIRST_NAMES.length - 1)];
+  const last = LEADER_LAST_NAMES[randInt(0, LEADER_LAST_NAMES.length - 1)];
+  return `${first} ${last}`;
+}
+
+// Builds a fresh Leader for a country: rolls an archetype (weighted by the
+// nation's government, unless overridden) and rolls individual traits within
+// that archetype's ranges, so no two leaders of the same archetype play
+// identically.
+function createLeader(world, country, archetypeKey = null) {
+  const key = archetypeKey && LEADER_ARCHETYPES[archetypeKey] ? archetypeKey : pickArchetypeFor(country);
+  const archetype = LEADER_ARCHETYPES[key];
+  const traits = {};
+  for (const [trait, [min, max]] of Object.entries(archetype.traitRanges)) {
+    traits[trait] = clamp(rand(min, max), 0, 1);
+  }
+  return {
+    id: uid("leader"),
+    name: generateLeaderName(),
+    archetype: key,
+    traits,
+    tookPowerTick: world.tick,
+    tookPowerDate: { ...world.date },
+    age: randInt(38, 66),
+    approval: clamp(55 + rand(-10, 10), 0, 100),
+    alive: true,
+  };
+}
+
+const LeadershipSystem = {
+  // Installs a founding leader on any country that doesn't already have one
+  // (fresh worlds, or old save data loaded before this subsystem existed).
+  initCountry(world, country) {
+    if (country.leader) return;
+    country.leader = createLeader(world, country);
+    HistorySystem.log(world, {
+      countryId: country.id,
+      type: "leader_installed",
+      description: `${country.leader.name} (${LEADER_ARCHETYPES[country.leader.archetype].title}) takes power in ${country.name}.`,
+      data: { archetype: country.leader.archetype },
+    });
+  },
+
+  tickCountry(world, country) {
+    const leader = country.leader;
+    if (!leader || !leader.alive) return;
+    const gov = govProfile(country.government);
+
+    // Approval drifts toward a target derived from real national conditions
+    // — stability, growth, unrest, and whether the nation is at war — rather
+    // than moving on its own.
+    const target = clamp(
+      40 +
+        (country.population.stability - 50) * 0.5 +
+        country.economy.lastGdpGrowthPct * 3 -
+        country.population.unrest * 0.3 -
+        (country.diplomacy.atWarWith.size > 0 ? 10 : 0),
+      0,
+      100
+    );
+    leader.approval = clamp(
+      leader.approval + (target - leader.approval) * CONFIG.LEADER_APPROVAL_DRIFT_RATE,
+      0,
+      100
+    );
+
+    // Aging and natural mortality — risk climbs after 65, and is never zero
+    // even for a younger leader (accident, illness, assassination attempt).
+    if (world.tick % CONFIG.TICKS_PER_YEAR === 0) leader.age += 1;
+    const mortalityChance = 0.0002 + (leader.age > 65 ? (leader.age - 65) * 0.0015 : 0);
+    if (Math.random() < mortalityChance) {
+      this.succeed(world, country, "death");
+      return;
+    }
+
+    // Term-limited succession for electoral governments.
+    const ticksInPower = world.tick - leader.tookPowerTick;
+    if (gov.electoral && ticksInPower >= CONFIG.LEADER_TERM_TICKS) {
+      this.holdElection(world, country);
+      return;
+    }
+
+    // Coup risk for high-suppression regimes whose leader has lost both
+    // public approval and the loyalty of the military.
+    if (!gov.electoral && gov.suppression > 0.25 && leader.approval < 20 && country.military.morale < 40) {
+      const coupChance = 0.01 + (20 - leader.approval) * 0.001;
+      if (Math.random() < coupChance) {
+        this.succeed(world, country, "coup");
+      }
+    }
+  },
+
+  holdElection(world, country) {
+    const leader = country.leader;
+    const reaffirmChance = clamp(leader.approval / 100, 0.05, 0.9);
+    if (Math.random() < reaffirmChance) {
+      leader.tookPowerTick = world.tick;
+      leader.approval = clamp(leader.approval + 5, 0, 100);
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "leader_reelected",
+        description: `${leader.name} is re-elected to lead ${country.name}.`,
+        data: { leaderId: leader.id },
+      });
+    } else {
+      this.succeed(world, country, "election");
+    }
+  },
+
+  // Replaces the current leader with a freshly rolled one (any archetype key
+  // may be forced, e.g. by the revolution pipeline handing off to a
+  // successor government). Archives the outgoing leader rather than
+  // discarding them, and applies real consequences for the more violent
+  // succession reasons.
+  succeed(world, country, reason, archetypeKey = null) {
+    const oldLeader = country.leader;
+    const newLeader = createLeader(world, country, archetypeKey);
+    country.leader = newLeader;
+    if (!country.leadershipHistory) country.leadershipHistory = [];
+    if (oldLeader) {
+      country.leadershipHistory.push({ ...oldLeader, leftTick: world.tick, leftReason: reason });
+      if (country.leadershipHistory.length > CONFIG.LEADER_MAX_HISTORY) {
+        country.leadershipHistory.shift();
+      }
+    }
+    if (reason === "coup") {
+      country.population.stability = clamp(country.population.stability - 12, 0, 100);
+      country.population.unrest = clamp(country.population.unrest + 10, 0, 100);
+      country.military.morale = clamp(country.military.morale - 10, 5, 100);
+    }
+    const reasonText = {
+      death: "dies in office",
+      coup: "is deposed in a coup",
+      election: "loses office at the ballot box",
+      revolution: "is swept away by revolution",
+    }[reason] ?? "leaves power";
+    HistorySystem.log(world, {
+      countryId: country.id,
+      type: "leader_succession",
+      description: `${oldLeader ? oldLeader.name : "The previous leader"} ${reasonText} in ${country.name}. ${newLeader.name} (${LEADER_ARCHETYPES[newLeader.archetype].title}) takes power.`,
+      data: { reason, fromLeaderId: oldLeader?.id ?? null, toLeaderId: newLeader.id },
+    });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Country data model
+// ---------------------------------------------------------------------------
+class Country {
+  constructor({
+    id,
+    name,
+    government,
+    personality,
+    geography,
+    startPop,
+    startGdpPerCapita,
+  }) {
+    this.id = id;
+    this.name = name;
+    this.government = government;
+
+    // Personality drives AI decision-making. All 0..1.
+    this.personality = {
+      aggression: personality.aggression,
+      diplomacy: personality.diplomacy,
+      economicFocus: personality.economicFocus,
+      isolationism: personality.isolationism,
+      opportunism: personality.opportunism,
+    };
+
+    // Geography — terrain composition, climate zone, river network, and raw
+    // resource endowment. These are the *inputs*; GeographySystem.getModifiers
+    // derives the effective fertility/minerals/energy/disaster values other
+    // systems actually use, combining terrain + climate + rivers each tick.
+    // Falls back to legacy flat fields (fertility/mineralWealth/energyPotential/
+    // disasterExposure) if present, so pre-Phase-2 save data still loads.
+    this.geography = {
+      terrain: geography.terrain ?? { mountains: 0.3, plains: 0.5, coastal: 0.3 },
+      climate: geography.climate ?? "Temperate",
+      hasRiver: geography.hasRiver ?? false,
+      riverAccess: geography.riverAccess ?? 0,
+      // Legacy lumped fields (mineralWealth/energyPotential) are kept for
+      // save-compatibility and still feed GeographySystem's derived
+      // mineralWealth/energyPotential values, but production is now driven
+      // by the seven named-commodity endowments below (Phase 3: named
+      // strategic resources). Any endowment missing from authored/loaded
+      // data (older saves, or a hand-authored nation that only set the
+      // legacy fields) falls back to a flat, unremarkable 0.35 — present,
+      // but never enough on its own to make a nation self-sufficient.
+      baseResources: {
+        fertility: geography.baseResources?.fertility ?? geography.fertility ?? 0.5,
+        mineralWealth: geography.baseResources?.mineralWealth ?? geography.mineralWealth ?? 0.5,
+        energyPotential: geography.baseResources?.energyPotential ?? geography.energyPotential ?? 0.5,
+        oilReserves: geography.baseResources?.oilReserves ?? 0.35,
+        gasReserves: geography.baseResources?.gasReserves ?? 0.35,
+        coalDeposits: geography.baseResources?.coalDeposits ?? 0.35,
+        uraniumDeposits: geography.baseResources?.uraniumDeposits ?? 0.35,
+        rareEarthDeposits: geography.baseResources?.rareEarthDeposits ?? 0.35,
+        freshwaterAvailability: geography.baseResources?.freshwaterAvailability ?? 0.35,
+      },
+      disasterExposureBase: geography.disasterExposureBase ?? geography.disasterExposure ?? 0.3,
+      // Land border adjacency to other country ids. Authored per-nation and
+      // symmetrized once at world creation (see GeographySystem.normalizeBorders)
+      // so a border only needs to be declared from one side.
+      neighbors: geography.neighbors ? [...geography.neighbors] : [],
+    };
+
+    this.population = {
+      total: startPop,
+      growthRatePct: 1.5,
+      employmentRatePct: 92,
+      educationLevel: 45,
+      stability: 65,
+      unrest: 10,
+      warFatigue: 0,
+      consecutiveHighUnrestTicks: 0,
+      // Unrest a coercive regime has forcibly suppressed rather than
+      // resolved. Builds up under high-suppression governments (see
+      // GOVERNMENT_PROFILES) and leaks back out as real unrest over time,
+      // and amplifies revolution severity if the regime is toppled while it
+      // is elevated. Legitimate, low-suppression governments never
+      // accumulate it (see PopulationSystem.tickCountry).
+      suppressedPressure: 0,
+    };
+
+    this.economy = {
+      gdpPerCapita: startGdpPerCapita,
+      gdp: startGdpPerCapita * startPop,
+      treasury: startGdpPerCapita * startPop * 0.05,
+      debt: 0,
+      taxRatePct: CONFIG.BASE_TAX_RATE * 100,
+      budget: {
+        // fractions of tax revenue; must sum to <= 1
+        military: 0.25,
+        research: 0.15,
+        infrastructure: 0.25,
+        welfare: 0.2,
+      },
+      // Raw strategic resources. Every nation produces and consumes all
+      // seven every tick (EconomySystem), and every one of them is a real,
+      // separately-endowed, separately-traded commodity (TradeSystem) — no
+      // nation's geography makes it strong in all seven, so every nation
+      // has a genuine, structural need for trade (see STARTING_NATIONS for
+      // the endowments that enforce this).
+      resources: {
+        food: { stock: 1000, production: 0, consumption: 0 },
+        water: { stock: 1000, production: 0, consumption: 0 },
+        oil: { stock: 400, production: 0, consumption: 0 },
+        naturalGas: { stock: 400, production: 0, consumption: 0 },
+        coal: { stock: 600, production: 0, consumption: 0 },
+        // Uranium and rare earths are produced/consumed/traded on a much
+        // smaller absolute scale than the bulk commodities above — that's
+        // intentional (real strategic minerals move in low volumes at high
+        // value) and is why their starting stocks and per-tick rates are an
+        // order of magnitude smaller throughout EconomySystem/TradeSystem.
+        uranium: { stock: 150, production: 0, consumption: 0 },
+        rareEarths: { stock: 80, production: 0, consumption: 0 },
+        industry: { output: 0 }, // derived, not stocked
+        // Finished/manufactured goods (machinery, vehicles, consumer products).
+        // Stocked like a raw resource but fed from industrial output rather
+        // than geography — see TradeSystem._updateGoodsProduction. It exists
+        // specifically so the trade network has a real tradeable commodity
+        // that isn't a raw material (the "Japan exports Cars" case).
+        goods: { stock: 300, production: 0, consumption: 0 },
+      },
+      lastGdpGrowthPct: 0,
+      // Rolling per-tick trade summary, recomputed by TradeSystem each tick.
+      tradeBalance: { exports: 0, imports: 0, net: 0 },
+    };
+
+    this.military = {
+      manpower: Math.floor(startPop * 0.01),
+      equipmentQuality: 30, // 0..100
+      doctrine: "Balanced", // Balanced | Defensive | Offensive
+      units: {
+        infantry: 20,
+        armor: 4,
+        navy: 2,
+        airforce: 3,
+      },
+      morale: 70,
+      strength: 0, // derived each tick
+    };
+
+    this.technology = {
+      researchPoints: 0,
+      levels: {
+        military: 10,
+        economic: 10,
+        industrial: 10,
+        medical: 10,
+      },
+    };
+
+    this.diplomacy = {
+      relations: new Map(), // countryId -> -100..100
+      treaties: [], // {type, withId, sinceTick} — alliance | trade | non-aggression | defense-pact
+      atWarWith: new Set(),
+      warExhaustion: 0,
+      tradeVolumes: new Map(), // countryId -> total units moved last tick (legacy/summary)
+      // countryId -> { exports:{commodity:qty}, imports:{commodity:qty},
+      // active, route, disruptedReason } — the real, per-commodity trade
+      // network edges for this country. See TradeSystem.
+      tradeFlows: new Map(),
+      // Sanctions are one-directional, unlike treaties, so they're tracked
+      // from both ends for O(1) lookups in either direction:
+      //   sanctions      — countryId -> { sinceTick, reason }  (I impose these)
+      //   sanctionedBy   — countryId -> { sinceTick, reason }  (imposed on me)
+      // Both sides are kept in sync by DiplomacySystem.imposeSanction/
+      // liftSanction — see that system for the single point of mutation.
+      sanctions: new Map(),
+      sanctionedBy: new Map(),
+    };
+
+    this.history = [];
+    this.alive = true; // set false on total conquest/collapse (future expansion)
+
+    // Current head of state/government (see LeadershipSystem) and an archive
+    // of past leaders this nation has had. Left null at construction time —
+    // LeadershipSystem.initCountry assigns a founding leader once the
+    // country is registered in a World (createNewWorld / SaveSystem).
+    this.leader = null;
+    this.leadershipHistory = [];
+  }
+
+  relationWith(otherId) {
+    return this.diplomacy.relations.get(otherId) ?? 0;
+  }
+
+  adjustRelation(otherId, delta) {
+    const cur = this.relationWith(otherId);
+    this.diplomacy.relations.set(otherId, clamp(cur + delta, -100, 100));
+  }
+
+  hasTreaty(type, withId) {
+    return this.diplomacy.treaties.some(
+      (t) => t.type === type && t.withId === withId
+    );
+  }
+
+  hasSanctionOn(otherId) {
+    return this.diplomacy.sanctions.has(otherId);
+  }
+
+  isSanctionedBy(otherId) {
+    return this.diplomacy.sanctionedBy.has(otherId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// World container
+// ---------------------------------------------------------------------------
+class World {
+  constructor() {
+    this.countries = new Map(); // id -> Country
+    this.date = { year: 2026, month: 1 };
+    this.tick = 0;
+    this.globalHistory = [];
+    this.pendingWars = []; // scheduled effects, e.g. active war state objects
+    this.wars = new Map(); // warId -> {a,b,startTick,exhaustionA,exhaustionB}
+  }
+
+  countryList() {
+    return Array.from(this.countries.values()).filter((c) => c.alive);
+  }
+
+  get(id) {
+    return this.countries.get(id);
+  }
+
+  advanceCalendar() {
+    this.tick += 1;
+    this.date.month += 1;
+    if (this.date.month > 12) {
+      this.date.month = 1;
+      this.date.year += 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Geography system
+// -----------------------------------------------------------------------------
+// This is the source of truth for anything geography-derived. Countries carry
+// raw inputs (terrain composition, climate zone, river access, base resource
+// endowment, land borders); every other system that needs an effective value
+// — production multipliers, disaster odds, combat terrain bonuses, trade
+// route feasibility — asks GeographySystem for it rather than reading raw
+// fields itself or re-deriving the math. Nothing here is randomized at
+// runtime: climate and terrain are fixed per-nation world data, and the
+// derivation formulas are deterministic.
+// ---------------------------------------------------------------------------
+const CLIMATE_PROFILES = {
+  // energyMult still governs the fossil-fuel endowments (oil/gas/coal) and
+  // mineralMult still governs the hard-mineral endowments (uranium/rare
+  // earths) — same climate levers as before Phase-3, just now applied to
+  // named commodities instead of one lumped "energy"/"minerals" figure.
+  // waterMult is new: freshwater availability by climate zone (arid zones
+  // are the one place this materially punishes a nation regardless of
+  // river access).
+  Tropical:    { fertilityMult: 1.25, energyMult: 0.90, mineralMult: 0.90, waterMult: 1.20, disasterMult: 1.30, popGrowthMult: 1.10 },
+  Arid:        { fertilityMult: 0.55, energyMult: 1.30, mineralMult: 1.05, waterMult: 0.45, disasterMult: 1.10, popGrowthMult: 0.85 },
+  Temperate:   { fertilityMult: 1.00, energyMult: 1.00, mineralMult: 1.00, waterMult: 1.00, disasterMult: 0.90, popGrowthMult: 1.00 },
+  Continental: { fertilityMult: 0.85, energyMult: 1.05, mineralMult: 1.15, waterMult: 0.90, disasterMult: 1.00, popGrowthMult: 0.95 },
+  // Not currently used by any starting nation, but a real, functional entry —
+  // future nations (e.g. an arctic expansion) plug in without new code.
+  Polar:       { fertilityMult: 0.35, energyMult: 1.20, mineralMult: 1.25, waterMult: 0.80, disasterMult: 0.80, popGrowthMult: 0.60 },
+};
+
+const GeographySystem = {
+  // Border lists only need to be authored from one side (see STARTING_NATIONS);
+  // this guarantees the adjacency graph is symmetric before anything reads it.
+  // Idempotent — safe to call again after loading a save.
+  normalizeBorders(world) {
+    for (const c of world.countryList()) {
+      for (const neighborId of c.geography.neighbors) {
+        const other = world.get(neighborId);
+        if (other && !other.geography.neighbors.includes(c.id)) {
+          other.geography.neighbors.push(c.id);
+        }
+      }
+    }
+  },
+
+  isNeighbor(a, b) {
+    return a.geography.neighbors.includes(b.id);
+  },
+
+  // Effective fertility/minerals/energy/disaster values for this tick, after
+  // applying climate profile, river irrigation/transport bonus, and terrain
+  // effects (mountains help minerals and hurt fertility; coastlines raise
+  // storm/flood exposure). EconomySystem, PopulationSystem, and EventSystem
+  // all read from here instead of the raw base endowment.
+  getModifiers(country) {
+    const g = country.geography;
+    const profile = CLIMATE_PROFILES[g.climate] ?? CLIMATE_PROFILES.Temperate;
+    const riverBonus = 1 + g.riverAccess * 0.25;
+    const mountainFertilityPenalty = 1 - g.terrain.mountains * 0.3;
+    const mountainMineralBonus = 1 + g.terrain.mountains * 0.4;
+    const coastalStormRisk = 1 + g.terrain.coastal * 0.15;
+
+    return {
+      fertility: clamp(
+        g.baseResources.fertility * profile.fertilityMult * riverBonus * mountainFertilityPenalty,
+        0, 1.5
+      ),
+      mineralWealth: clamp(
+        g.baseResources.mineralWealth * profile.mineralMult * mountainMineralBonus,
+        0, 1.5
+      ),
+      energyPotential: clamp(
+        g.baseResources.energyPotential * profile.energyMult,
+        0, 1.5
+      ),
+      // --- Named strategic-resource endowments (Phase 3) ---
+      // Oil and gas ride the same climate lever as the legacy energyPotential
+      // (arid/continental zones run hot) but are NOT terrain-boosted by
+      // mountains — they're deposit-driven, not extraction-difficulty-driven.
+      oil: clamp(g.baseResources.oilReserves * profile.energyMult, 0, 1.5),
+      naturalGas: clamp(g.baseResources.gasReserves * profile.energyMult, 0, 1.5),
+      // Coal, uranium, and rare earths are hard-mineral commodities, so they
+      // share mineralWealth's mountain-mining bonus, each off its own
+      // authored deposit endowment.
+      coal: clamp(g.baseResources.coalDeposits * profile.mineralMult * mountainMineralBonus, 0, 1.5),
+      uranium: clamp(g.baseResources.uraniumDeposits * profile.mineralMult * mountainMineralBonus, 0, 1.5),
+      rareEarths: clamp(g.baseResources.rareEarthDeposits * profile.mineralMult * mountainMineralBonus, 0, 1.5),
+      // Freshwater follows river access and climate, same as fertility, but
+      // is not penalized by mountainous terrain the way farmland is.
+      freshwater: clamp(
+        g.baseResources.freshwaterAvailability * profile.waterMult * riverBonus,
+        0, 1.5
+      ),
+      disasterExposure: clamp(
+        g.disasterExposureBase * profile.disasterMult * coastalStormRisk,
+        0, 1
+      ),
+      popGrowthMult: profile.popGrowthMult,
+    };
+  },
+
+  // A real, if simplified, home-terrain defense advantage: mountainous
+  // ground favors whoever is dug in on it over whoever is attacking through
+  // it. Returns a strength multiplier (>=1) applied to the defending side in
+  // combat resolution. Documented as v1 — later phases can add per-front
+  // terrain (border region vs. interior) without changing this contract.
+  defenseMultiplier(country) {
+    return 1 + country.geography.terrain.mountains * 0.35;
+  },
+
+  // Whether goods can physically move between two countries, and how much
+  // friction the route carries. A trade treaty is a diplomatic agreement;
+  // this is the infrastructure check that decides whether it produces any
+  // real flow. No shared border and no shared ocean access means no route —
+  // that's a legitimate outcome, not a missing feature.
+  tradeRoute(a, b) {
+    if (this.isNeighbor(a, b)) {
+      const mountainFriction = (a.geography.terrain.mountains + b.geography.terrain.mountains) / 2;
+      return { viable: true, type: "land", efficiency: clamp(0.9 - mountainFriction * 0.3, 0.3, 0.9) };
+    }
+    if (a.geography.terrain.coastal > 0 && b.geography.terrain.coastal > 0) {
+      return { viable: true, type: "sea", efficiency: 0.65 };
+    }
+    return { viable: false, type: "none", efficiency: 0 };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Trade commodities
+// -----------------------------------------------------------------------------
+// The set of goods that can actually move through the trade network. Three
+// are raw resources already produced/consumed by EconomySystem; "goods"
+// (finished/manufactured products — machinery, vehicles, consumer products)
+// is derived from industrial output specifically for trade (see
+// TradeSystem._updateGoodsProduction) so the network has a real manufactured
+// export, not just raw materials. `price` is the per-unit treasury value
+// used to settle each shipment between buyer and seller.
+// ---------------------------------------------------------------------------
+const TRADE_GOODS = {
+  food:       { label: "Food",                          price: 0.09 },
+  water:      { label: "Water (fresh water)",           price: 0.06 },
+  oil:        { label: "Oil",                           price: 0.32 },
+  naturalGas: { label: "Natural Gas",                   price: 0.24 },
+  coal:       { label: "Coal",                          price: 0.13 },
+  // Low-volume, high-value strategic minerals — see the resource-stock
+  // comment on Country.economy.resources for why their numbers are an
+  // order of magnitude smaller than the bulk commodities above.
+  uranium:    { label: "Uranium",                       price: 0.70 },
+  rareEarths: { label: "Rare Earth Metals",             price: 0.95 },
+  goods:      { label: "Manufactured Goods (vehicles, machinery)", price: 0.42 },
+};
+const COMMODITY_KEYS = Object.keys(TRADE_GOODS);
+
+// ---------------------------------------------------------------------------
+// Trade Network system
+// -----------------------------------------------------------------------------
+// A real, multi-commodity trade network rather than a flat GDP bonus. Each
+// tick:
+//   1. Manufactured "goods" stock is produced from industrial output.
+//   2. Every nation's exportable surplus and import need is computed per
+//      commodity, independent of any one partner — this is what makes it a
+//      *network* rather than a series of isolated bilateral deals: a nation
+//      can export energy to one partner while importing minerals from
+//      another, all drawn from the same underlying supply/demand position.
+//   3. Every standing "trade" treaty pair is resolved as an edge: physical
+//      goods move (subject to GeographySystem.tradeRoute friction/loss), and
+//      buyer pays seller directly (a real, zero-sum transfer, not free money
+//      to both sides).
+//   4. Edges blocked by war or lacking a physical route are marked disrupted
+//      — trade stops, which starves the importer's stock and (through
+//      EconomySystem's existing scarcity penalties) their production and
+//      stability, a real downstream consequence rather than a scripted one.
+// ---------------------------------------------------------------------------
+const TradeSystem = {
+  GOODS_EXPORT_SHARE: 0.4,   // share of industrial output that becomes exportable finished goods
+  // Reserve target, in months of consumption. Uranium/rare earths carry the
+  // longest reserve horizon — real strategic-mineral stockpiles are held in
+  // months-to-years of buffer precisely because supply is thin and volatile.
+  SAFETY_STOCK_MONTHS: { food: 2.5, water: 2, oil: 3, naturalGas: 3, coal: 4, uranium: 6, rareEarths: 6, goods: 1.5 },
+  MAX_EXPORT_SHARE: 0.35,    // fraction of a nation's surplus-above-reserve it will ship out in one tick
+  MAX_IMPORT_SHARE: 0.6,     // fraction of a nation's shortfall it will attempt to cover in one tick
+  MIN_SHIPMENT: 5,           // ignore dust-level flows not worth tracking
+
+  tickWorld(world) {
+    const countries = world.countryList();
+    if (countries.length === 0) return;
+
+    for (const c of countries) this._updateGoodsProduction(c);
+    const positions = this._computeTradePositions(countries);
+
+    // Enumerate each distinct trade-treaty pair once. Sorting by combined
+    // relation strength means that when a nation's exportable surplus is
+    // limited, trusted partners get first claim on it — the same way real
+    // trade prioritizes established partners under supply constraints.
+    const pairs = [];
+    const seenPairs = new Set();
+    for (const a of countries) {
+      for (const treaty of a.diplomacy.treaties) {
+        if (treaty.type !== "trade") continue;
+        const b = world.get(treaty.withId);
+        if (!b || !b.alive) continue;
+        const key = [a.id, b.id].sort().join("|");
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+        pairs.push({ a, b, relSum: a.relationWith(b.id) + b.relationWith(a.id) });
+      }
+    }
+    pairs.sort((x, y) => y.relSum - x.relSum);
+
+    const activePartners = new Map(countries.map((c) => [c.id, new Set()]));
+    for (const { a, b } of pairs) {
+      activePartners.get(a.id)?.add(b.id);
+      activePartners.get(b.id)?.add(a.id);
+
+      const atWar = a.diplomacy.atWarWith.has(b.id);
+      const route = GeographySystem.tradeRoute(a, b);
+      if (atWar || !route.viable) {
+        this._markDisrupted(world, a, b, atWar ? "war" : "no route");
+        continue;
+      }
+      // Sanctions don't sever a route outright the way war does, and unlike
+      // geographic friction they don't waste goods in transit either — they
+      // throttle how much is offered/accepted for trade in the first place
+      // (compliance rules, lost preferential terms, buyers and sellers
+      // routing around each other). Modeled as a direct cap on the
+      // shippable quantity, not a cut to route.efficiency, so the exporter's
+      // stock is only drawn down by what actually moves.
+      const sanctioned = a.hasSanctionOn(b.id) || b.hasSanctionOn(a.id);
+      const capMultiplier = sanctioned ? CONFIG.SANCTION_TRADE_EFFICIENCY_MULT : 1;
+      this._resolveEdge(world, a, b, route, positions, capMultiplier);
+    }
+
+    // Drop flow records for pairs whose trade treaty no longer exists
+    // (canceled, or a partner was conquered) so stale edges don't linger.
+    for (const c of countries) {
+      for (const partnerId of Array.from(c.diplomacy.tradeFlows.keys())) {
+        if (!activePartners.get(c.id)?.has(partnerId)) {
+          c.diplomacy.tradeFlows.delete(partnerId);
+          c.diplomacy.tradeVolumes.delete(partnerId);
+        }
+      }
+      this._updateTradeBalance(c);
+    }
+  },
+
+  // Finished-goods pool: a share of this tick's industrial output becomes
+  // exportable product; the rest is absorbed as domestic capital investment
+  // (already reflected in GDP/infrastructure). Domestic consumers also draw
+  // down the pool, scaling with population and prosperity.
+  _updateGoodsProduction(country) {
+    const industry = country.economy.resources.industry;
+    const goods = country.economy.resources.goods;
+    goods.production = industry.output * this.GOODS_EXPORT_SHARE;
+    goods.consumption =
+      country.population.total * 0.00006 * (0.4 + country.economy.gdpPerCapita / 4000);
+    goods.stock = Math.max(0, goods.stock + goods.production - goods.consumption);
+  },
+
+  SPECIALIZATION_STRENGTH: 0.55, // how strongly per-capita comparative advantage translates into export/import share
+
+  // Per-country, per-commodity exportable surplus and import need, computed
+  // once from each nation's own stock/production/consumption — independent
+  // of any specific trade partner. Two real drivers are combined, matching
+  // why nations actually trade:
+  //   - Comparative advantage: a nation producing more of a commodity per
+  //     capita than the network average specializes in exporting it (e.g. a
+  //     mineral-rich nation exports ore even with no shortage anywhere else);
+  //     one producing less per capita is a natural importer of it. This is
+  //     what generates steady, structural trade rather than only crisis
+  //     trade — real economies trade constantly, not just during shortages.
+  //   - Reserve buffers: a nation whose stock has fallen below its own
+  //     safety reserve (disaster, war strain, population growth outrunning
+  //     production) gets an added, urgent import need and throttles its own
+  //     exports, regardless of its long-run comparative advantage.
+  // Buffers scale with the nation's own consumption ("months of reserve")
+  // rather than a flat number, so this behaves sensibly for both a small
+  // state and a continental power.
+  _computeTradePositions(countries) {
+    // Network-average per-capita production for each commodity is the
+    // yardstick comparative advantage is measured against.
+    const networkAvgPerCapita = {};
+    for (const key of COMMODITY_KEYS) {
+      let totalProd = 0, totalPop = 0;
+      for (const c of countries) {
+        totalProd += c.economy.resources[key].production;
+        totalPop += c.population.total;
+      }
+      networkAvgPerCapita[key] = totalPop > 0 ? totalProd / totalPop : 0;
+    }
+
+    const positions = new Map();
+    for (const c of countries) {
+      const pos = {};
+      for (const key of COMMODITY_KEYS) {
+        const res = c.economy.resources[key];
+        const netFlow = res.production - res.consumption;
+        const reserveTarget = Math.max(50, res.consumption * (this.SAFETY_STOCK_MONTHS[key] ?? 2));
+        const stockAboveReserve = Math.max(0, res.stock - reserveTarget);
+        const stockShortfall = Math.max(0, reserveTarget - res.stock);
+
+        const perCapitaProd = res.production / Math.max(1, c.population.total);
+        const avg = networkAvgPerCapita[key];
+        // >1 = produces more of this per capita than the network average
+        // (a natural exporter/specialist); <1 = a natural importer of it.
+        const advantage = avg > 0 ? perCapitaProd / avg : 1;
+
+        const specializationExport = res.production * clamp((advantage - 1) * this.SPECIALIZATION_STRENGTH, 0, 0.6);
+        const specializationImport = res.consumption * clamp((1 - advantage) * this.SPECIALIZATION_STRENGTH, 0, 0.6);
+
+        // Can only actually ship what isn't already earmarked as reserve,
+        // and a fast-draining stock throttles exports even if this nation
+        // is nominally a specialist exporter of the commodity.
+        let exportable = Math.min(specializationExport, stockAboveReserve);
+        if (netFlow < 0 && res.consumption > 0) {
+          exportable *= clamp(1 + netFlow / res.consumption, 0, 1);
+        }
+        exportable *= this.MAX_EXPORT_SHARE;
+
+        // Structural (specialization) demand plus urgent (below-reserve)
+        // demand combine into total import need.
+        let importNeed = specializationImport + stockShortfall;
+        if (netFlow < 0) importNeed += Math.abs(netFlow) * 0.6; // anticipate the coming shortfall
+        importNeed *= this.MAX_IMPORT_SHARE;
+
+        pos[key] = { exportable, importNeed };
+      }
+      positions.set(c.id, pos);
+    }
+    return positions;
+  },
+
+  _flowEntry(country, partnerId) {
+    let e = country.diplomacy.tradeFlows.get(partnerId);
+    if (!e) {
+      e = { exports: {}, imports: {}, active: undefined, route: null, disruptedReason: null };
+      country.diplomacy.tradeFlows.set(partnerId, e);
+    }
+    return e;
+  },
+
+  // One commodity, one direction: seller ships up to its exportable surplus
+  // or the buyer's remaining need, whichever is smaller; transit friction
+  // (GeographySystem.tradeRoute efficiency) is lost in shipping, and the
+  // buyer pays the seller for what actually arrives — a real, zero-sum
+  // transfer rather than income conjured for both sides. capMultiplier
+  // scales the shippable quantity itself (not transit loss) — this is how
+  // a sanction throttles trade: less is shipped in the first place (and the
+  // seller's stock is drawn down by only that reduced amount), not the same
+  // quantity dispatched and mostly wasted in transit.
+  _shipCommodity(seller, buyer, key, sPos, bPos, route, sellEntry, buyEntry, capMultiplier = 1) {
+    if (sPos[key].exportable <= 0 || bPos[key].importNeed <= 0) return 0;
+    const shipped = Math.min(sPos[key].exportable, bPos[key].importNeed) * capMultiplier;
+    if (shipped < this.MIN_SHIPMENT) return 0;
+
+    const received = shipped * route.efficiency;
+    seller.economy.resources[key].stock -= shipped;
+    buyer.economy.resources[key].stock += received;
+    sPos[key].exportable -= shipped;
+    bPos[key].importNeed -= shipped;
+
+    sellEntry.exports[key] = (sellEntry.exports[key] ?? 0) + shipped;
+    buyEntry.imports[key] = (buyEntry.imports[key] ?? 0) + received;
+
+    const value = received * TRADE_GOODS[key].price;
+    seller.economy.treasury += value;
+    buyer.economy.treasury -= value;
+
+    return shipped;
+  },
+
+  _resolveEdge(world, a, b, route, positions, capMultiplier = 1) {
+    const entryA = this._flowEntry(a, b.id);
+    const entryB = this._flowEntry(b, a.id);
+    const wasInactive = entryA.active === false;
+    entryA.exports = {}; entryA.imports = {}; entryA.route = route; entryA.disruptedReason = null;
+    entryB.exports = {}; entryB.imports = {}; entryB.route = route; entryB.disruptedReason = null;
+
+    const posA = positions.get(a.id), posB = positions.get(b.id);
+    let totalVolume = 0;
+    for (const key of COMMODITY_KEYS) {
+      totalVolume += this._shipCommodity(a, b, key, posA, posB, route, entryA, entryB, capMultiplier);
+      totalVolume += this._shipCommodity(b, a, key, posB, posA, route, entryB, entryA, capMultiplier);
+    }
+
+    entryA.active = true;
+    entryB.active = true;
+    a.diplomacy.tradeVolumes.set(b.id, totalVolume);
+    b.diplomacy.tradeVolumes.set(a.id, totalVolume);
+
+    if (totalVolume > 0) {
+      // Active trade routes measurably strengthen ties over time.
+      a.adjustRelation(b.id, 0.05);
+      b.adjustRelation(a.id, 0.05);
+      if (wasInactive) {
+        HistorySystem.log(world, {
+          countryId: a.id,
+          type: "trade_resumed",
+          description: `Trade between ${a.name} and ${b.name} has resumed.`,
+          data: { with: b.id },
+        });
+      }
+    }
+    return totalVolume;
+  },
+
+  _markDisrupted(world, a, b, reason) {
+    const entryA = this._flowEntry(a, b.id);
+    const entryB = this._flowEntry(b, a.id);
+    const wasActive = entryA.active === true;
+    entryA.exports = {}; entryA.imports = {};
+    entryB.exports = {}; entryB.imports = {};
+    entryA.active = false; entryB.active = false;
+    entryA.disruptedReason = reason; entryB.disruptedReason = reason;
+    a.diplomacy.tradeVolumes.set(b.id, 0);
+    b.diplomacy.tradeVolumes.set(a.id, 0);
+
+    if (wasActive) {
+      HistorySystem.log(world, {
+        countryId: a.id,
+        type: "trade_disrupted",
+        description:
+          reason === "war"
+            ? `Trade between ${a.name} and ${b.name} has been cut off by war.`
+            : `The trade route between ${a.name} and ${b.name} is no longer viable.`,
+        data: { with: b.id, reason },
+      });
+    }
+  },
+
+  // Rolling per-tick export/import value, read by the UI (and available to
+  // future AI heuristics) as a single trade-balance figure per nation.
+  _updateTradeBalance(country) {
+    let exportValue = 0, importValue = 0;
+    for (const flow of country.diplomacy.tradeFlows.values()) {
+      for (const key of COMMODITY_KEYS) {
+        if (flow.exports[key]) exportValue += flow.exports[key] * TRADE_GOODS[key].price;
+        if (flow.imports[key]) importValue += flow.imports[key] * TRADE_GOODS[key].price;
+      }
+    }
+    country.economy.tradeBalance = {
+      exports: exportValue,
+      imports: importValue,
+      net: exportValue - importValue,
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// History system
+// ---------------------------------------------------------------------------
+const HistorySystem = {
+  log(world, { countryId = null, type, description, data = {} }) {
+    const entry = {
+      tick: world.tick,
+      date: { ...world.date },
+      countryId,
+      type,
+      description,
+      data,
+    };
+    world.globalHistory.push(entry);
+    if (world.globalHistory.length > CONFIG.HISTORY_CAP_GLOBAL) {
+      // Roll oldest quarter into a compressed summary rather than dropping
+      // silently, preserving long-run legibility.
+      const dropCount = Math.floor(CONFIG.HISTORY_CAP_GLOBAL * 0.1);
+      world.globalHistory.splice(0, dropCount);
+    }
+    if (countryId) {
+      const c = world.get(countryId);
+      if (c) {
+        c.history.push(entry);
+        if (c.history.length > CONFIG.HISTORY_CAP_COUNTRY) {
+          c.history.splice(0, Math.floor(CONFIG.HISTORY_CAP_COUNTRY * 0.1));
+        }
+      }
+    }
+    return entry;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Economy system
+// ---------------------------------------------------------------------------
+const EconomySystem = {
+  tickCountry(country, world) {
+    const { economy, population, technology, military } = country;
+
+    // Effective, terrain/climate-derived resource multipliers for this tick —
+    // see GeographySystem.getModifiers for how mountains, rivers, and climate
+    // combine into these values.
+    const geoMods = GeographySystem.getModifiers(country);
+
+    // --- Resource production/consumption ---
+    // Tech provides a mild multiplier on top of a viable baseline — a nation
+    // at tech level 0 should still be able to feed itself if geography is
+    // adequate; technology raises the ceiling rather than gating survival.
+    const industrialTechFactor = 0.9 + technology.levels.industrial / 250; // 0.9..1.3
+    const infraLevel = economy.budget.infrastructure; // 0..1 recent investment share
+
+    const food = economy.resources.food;
+    food.production =
+      population.total * 0.0012 * (0.55 + geoMods.fertility) * industrialTechFactor;
+    food.consumption = population.total * 0.00085;
+    food.stock = Math.max(0, food.stock + food.production - food.consumption);
+
+    // Water: population's direct need plus an irrigation draw proportional
+    // to that tick's food production — farming a hungry, fertile nation
+    // still costs water, so high food output doesn't come for free even
+    // where freshwater is scarce (a real coupling between two resources,
+    // not two independent meters).
+    const water = economy.resources.water;
+    water.production =
+      population.total * 0.0011 * (0.5 + geoMods.freshwater) * industrialTechFactor;
+    water.consumption =
+      population.total * 0.0009 * (0.75 + infraLevel * 0.35) + food.production * 0.15;
+    water.stock = Math.max(0, water.stock + water.production - water.consumption);
+
+    // Oil, natural gas, and coal: the fossil-fuel trio. Consumption on all
+    // three scales with population and infrastructure (power generation,
+    // transport, heavy industry all draw on them), independent of local
+    // deposits — a nation can be short on oil even while sitting on plenty
+    // of coal, exactly as in reality.
+    const oil = economy.resources.oil;
+    oil.production =
+      population.total * 0.00035 * (0.4 + geoMods.oil) * industrialTechFactor;
+    oil.consumption = population.total * 0.00030 * (0.65 + infraLevel * 0.55);
+    oil.stock = Math.max(0, oil.stock + oil.production - oil.consumption);
+
+    const naturalGas = economy.resources.naturalGas;
+    naturalGas.production =
+      population.total * 0.00032 * (0.4 + geoMods.naturalGas) * industrialTechFactor;
+    naturalGas.consumption = population.total * 0.00026 * (0.6 + infraLevel * 0.5);
+    naturalGas.stock = Math.max(0, naturalGas.stock + naturalGas.production - naturalGas.consumption);
+
+    const coal = economy.resources.coal;
+    coal.production =
+      population.total * 0.00040 * (0.45 + geoMods.coal) * industrialTechFactor;
+    coal.consumption = population.total * 0.00034 * (0.6 + infraLevel * 0.45);
+    coal.stock = Math.max(0, coal.stock + coal.production - coal.consumption);
+
+    // Uranium and rare earths: low-volume strategic minerals. Consumption
+    // tracks technology level rather than population/infrastructure directly
+    // — nuclear power/weapons programs and advanced electronics manufacturing
+    // are what actually draw these down, not day-to-day civilian demand.
+    const uranium = economy.resources.uranium;
+    uranium.production =
+      population.total * 0.00006 * (0.3 + geoMods.uranium) * industrialTechFactor;
+    uranium.consumption =
+      population.total * 0.00003 * (0.2 + technology.levels.industrial / 200);
+    uranium.stock = Math.max(0, uranium.stock + uranium.production - uranium.consumption);
+
+    const rareEarths = economy.resources.rareEarths;
+    rareEarths.production =
+      population.total * 0.00004 * (0.25 + geoMods.rareEarths) * industrialTechFactor;
+    rareEarths.consumption =
+      population.total * 0.000025 * (0.2 + technology.levels.economic / 200);
+    rareEarths.stock = Math.max(0, rareEarths.stock + rareEarths.production - rareEarths.consumption);
+
+    // Resource scarcity/surplus feeds back into industrial output. Every one
+    // of the seven raw resources contributes — a nation can be undone by
+    // running dry on any single one of them, not just the traditional big
+    // three, which is precisely what forces genuine multilateral trade
+    // dependence instead of two or three nations being able to self-supply.
+    const scarcityPenalty =
+      (food.stock <= 0 ? 0.10 : 0) +
+      (water.stock <= 0 ? 0.08 : 0) +
+      (oil.stock <= 0 ? 0.05 : 0) +
+      (naturalGas.stock <= 0 ? 0.04 : 0) +
+      (coal.stock <= 0 ? 0.04 : 0) +
+      (uranium.stock <= 0 ? 0.03 : 0) +
+      (rareEarths.stock <= 0 ? 0.03 : 0);
+    const surplusBonus =
+      (food.stock > 3000 ? 0.015 : 0) +
+      (water.stock > 3000 ? 0.01 : 0) +
+      (oil.stock > 1500 ? 0.01 : 0) +
+      (naturalGas.stock > 1500 ? 0.01 : 0) +
+      (coal.stock > 2000 ? 0.01 : 0) +
+      (uranium.stock > 500 ? 0.005 : 0) +
+      (rareEarths.stock > 300 ? 0.005 : 0);
+
+    economy.resources.industry.output =
+      population.total *
+      (population.employmentRatePct / 100) *
+      0.0012 *
+      industrialTechFactor *
+      (1 - scarcityPenalty + surplusBonus);
+
+    // --- GDP ---
+    const educationFactor = 0.5 + population.educationLevel / 100;
+    const stabilityFactor = 0.6 + population.stability / 200; // 0.6..1.1
+    const economicTechFactor = 0.5 + technology.levels.economic / 100;
+    const warPenalty = country.diplomacy.atWarWith.size > 0 ? 0.88 : 1;
+    // Broader isolation penalty from being sanctioned — beyond the direct
+    // bilateral trade friction (handled in TradeSystem), being cut off by
+    // multiple nations at once carries real reputational/financial-market
+    // costs (frozen assets, lost investment, currency pressure). Scales
+    // with how many nations are sanctioning this one, capped so it stays
+    // survivable rather than a death spiral.
+    const sanctionPenalty = clamp(
+      1 - CONFIG.SANCTION_GDP_PENALTY_PER * country.diplomacy.sanctionedBy.size,
+      1 - CONFIG.SANCTION_GDP_PENALTY_MAX,
+      1
+    );
+
+    const newGdpPerCapita =
+      1600 *
+      (1 + country.personality.economicFocus * 0.35) *
+      economicTechFactor *
+      educationFactor *
+      stabilityFactor *
+      warPenalty *
+      sanctionPenalty;
+
+    economy.lastGdpGrowthPct =
+      economy.gdpPerCapita > 0
+        ? ((newGdpPerCapita - economy.gdpPerCapita) / economy.gdpPerCapita) * 100
+        : 0;
+    economy.gdpPerCapita = newGdpPerCapita;
+    economy.gdp = economy.gdpPerCapita * population.total;
+
+    // --- Fiscal cycle ---
+    const taxRevenue = economy.gdp * (economy.taxRatePct / 100) / CONFIG.TICKS_PER_YEAR;
+    const totalBudgetFraction =
+      economy.budget.military +
+      economy.budget.research +
+      economy.budget.infrastructure +
+      economy.budget.welfare;
+    const spend = taxRevenue * Math.min(1, totalBudgetFraction);
+
+    const debtInterest = economy.debt * CONFIG.DEBT_INTEREST_MONTHLY;
+    economy.treasury += taxRevenue - spend - debtInterest;
+
+    if (economy.treasury < 0) {
+      economy.debt += -economy.treasury;
+      economy.treasury = 0;
+    } else if (economy.debt > 0) {
+      const payoff = Math.min(economy.debt, economy.treasury * 0.1);
+      economy.debt -= payoff;
+      economy.treasury -= payoff;
+    }
+
+    // --- Spending effects ---
+    // Normalize every spending effect by per-capita spend so magnitudes stay
+    // meaningful regardless of a country's absolute GDP scale.
+    const militarySpend = spend * (economy.budget.military / (totalBudgetFraction || 1));
+    const researchSpend = spend * (economy.budget.research / (totalBudgetFraction || 1));
+    const infraSpend = spend * (economy.budget.infrastructure / (totalBudgetFraction || 1));
+    const welfareSpend = spend * (economy.budget.welfare / (totalBudgetFraction || 1));
+
+    const perCapita = (amount) => amount / Math.max(1, population.total);
+    const researchSpendPC = perCapita(researchSpend);
+    const infraSpendPC = perCapita(infraSpend);
+    const welfareSpendPC = perCapita(welfareSpend);
+
+    // Research → research points (education amplifies conversion efficiency)
+    technology.researchPoints +=
+      researchSpendPC * 8 * (0.5 + population.educationLevel / 100);
+
+    // Infrastructure → gradually raises industrial tech and stability
+    technology.levels.industrial = clamp(
+      technology.levels.industrial +
+        infraSpendPC * 0.0025 * (1 - technology.levels.industrial / CONFIG.MAX_TECH_LEVEL),
+      0,
+      CONFIG.MAX_TECH_LEVEL
+    );
+    // Diminishing returns as stability approaches its ceiling — sustained
+    // spending buys a high-stability plateau, not an instant, permanent 100.
+    population.stability = clamp(
+      population.stability + infraSpendPC * 0.02 * (1 - population.stability / 100),
+      0,
+      100
+    );
+
+    // Welfare → stability, unrest relief, education (diminishing returns near caps)
+    population.stability = clamp(
+      population.stability + welfareSpendPC * 0.025 * (1 - population.stability / 100),
+      0,
+      100
+    );
+    population.unrest = clamp(
+      population.unrest - welfareSpendPC * 0.03 * (population.unrest / 100),
+      0,
+      100
+    );
+    population.educationLevel = clamp(
+      population.educationLevel + welfareSpendPC * 0.0015,
+      0,
+      100
+    );
+
+    // Military spend handled in MilitarySystem (needs it here for building units)
+    country._militarySpend = militarySpend;
+
+    // Debt burden depresses stability over time if severe
+    if (economy.debt > economy.gdp * 0.6) {
+      population.stability = clamp(population.stability - 0.4, 0, 100);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Population system
+// ---------------------------------------------------------------------------
+const PopulationSystem = {
+  tickCountry(country, world) {
+    const { population, economy, technology } = country;
+
+    const medicalFactor = 0.7 + technology.levels.medical / 200; // 0.7..1.2
+    const stabilityFactor = population.stability / 100; // 0..1
+    const foodStock = economy.resources.food.stock;
+    const foodPressure = foodStock <= 0 ? -0.6 : foodStock < 200 ? -0.2 : 0.1;
+    // Water scarcity is a real demographic pressure alongside food — a
+    // nation can be well-fed and still see growth suffer if it's running
+    // dry, matching food's shape but at slightly lower weight (thirst kills
+    // faster than hunger, but sustained drought is rarer than a bad harvest).
+    const waterStock = economy.resources.water.stock;
+    const waterPressure = waterStock <= 0 ? -0.5 : waterStock < 200 ? -0.15 : 0.05;
+    const warPenalty = country.diplomacy.atWarWith.size > 0 ? -0.35 : 0;
+    // Climate is a real demographic input: harsh zones (arid, polar) carry a
+    // lower sustainable growth ceiling than temperate/tropical ones.
+    const climatePopGrowthMult = GeographySystem.getModifiers(country).popGrowthMult;
+
+    population.growthRatePct = clamp(
+      (CONFIG.BASE_POP_GROWTH_MONTHLY *
+        CONFIG.TICKS_PER_YEAR *
+        100 *
+        medicalFactor *
+        (0.4 + stabilityFactor * 0.8) +
+        foodPressure +
+        waterPressure +
+        warPenalty) *
+        (1 - population.unrest / 300) *
+        climatePopGrowthMult,
+      -3,
+      4
+    );
+
+    population.total = Math.max(
+      1000,
+      Math.round(population.total * (1 + population.growthRatePct / 100 / CONFIG.TICKS_PER_YEAR))
+    );
+
+    // Employment equilibrates toward a level set by industrial output vs. labor force
+    const laborDemandIndex = clamp(
+      50 + economy.resources.industry.output / (population.total * 0.00001 + 1) / 100,
+      40,
+      98
+    );
+    population.employmentRatePct = lerp(population.employmentRatePct, laborDemandIndex, 0.15);
+
+    // Unrest dynamics: unemployment, war fatigue, treasury stress, low stability,
+    // plus a small structural baseline so no society settles at literally zero
+    // friction — every population has some irreducible level of grievance.
+    const unemployment = 100 - population.employmentRatePct;
+    const structuralFriction = 1.5 + (1 - population.stability / 100) * 2;
+    let unrestPressure =
+      unemployment * 0.06 +
+      structuralFriction * 0.15 +
+      (economy.debt > economy.gdp * 0.4 ? 3 : 0) +
+      (country.diplomacy.atWarWith.size > 0 ? 1.2 : 0) -
+      (population.stability > 70 ? 1 : 0);
+    population.unrest = clamp(population.unrest + unrestPressure * 0.2, 0, 100);
+
+    // War fatigue accumulates while at war, decays otherwise
+    if (country.diplomacy.atWarWith.size > 0) {
+      population.warFatigue = clamp(population.warFatigue + 1.1, 0, 100);
+    } else {
+      population.warFatigue = clamp(population.warFatigue - 1.5, 0, 100);
+    }
+
+    // Government-driven coercive suppression: authoritarian regimes can
+    // forcibly compress a share of visible unrest each tick instead of
+    // addressing what's causing it. This is a real trade-off, not a flat
+    // discount — every point suppressed is banked into suppressedPressure,
+    // which slowly leaks back out as genuine unrest once it builds up, and
+    // makes the eventual revolution (if one happens) more severe. Low- or
+    // no-suppression governments (Democracy, Federation, Republic-leaning)
+    // instead let banked pressure dissipate safely, since it was never
+    // artificially bottled up in the first place.
+    const gov = govProfile(country.government);
+    if (gov.suppression > 0 && population.unrest > 0) {
+      const suppressed = population.unrest * gov.suppression * 0.15;
+      population.unrest = clamp(population.unrest - suppressed, 0, 100);
+      population.suppressedPressure = clamp(population.suppressedPressure + suppressed * 0.6, 0, 100);
+    } else {
+      population.suppressedPressure = clamp(population.suppressedPressure - 1, 0, 100);
+    }
+    // Bottled-up pressure above a threshold starts leaking back out as real,
+    // visible unrest — repression buys time, not a permanent discount.
+    if (population.suppressedPressure > 40) {
+      population.unrest = clamp(
+        population.unrest + (population.suppressedPressure - 40) * 0.01,
+        0,
+        100
+      );
+    }
+
+    // Track consecutive high-unrest ticks for revolution trigger (EventSystem reads this)
+    if (population.unrest >= CONFIG.UNREST_REVOLUTION_THRESHOLD) {
+      population.consecutiveHighUnrestTicks += 1;
+    } else {
+      population.consecutiveHighUnrestTicks = 0;
+    }
+
+    // Stability naturally regresses toward a government-type baseline, at a
+    // rate that also depends on government type (tight authoritarian control
+    // snaps back to baseline faster; looser pluralistic systems drift more
+    // slowly).
+    population.stability = lerp(
+      population.stability,
+      gov.stabilityBaseline,
+      0.02 * gov.stabilityRegression
+    );
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Technology system
+// ---------------------------------------------------------------------------
+const TechnologySystem = {
+  tickCountry(country, world) {
+    const { technology, personality } = country;
+
+    // Spend accumulated research points to raise tech levels, weighted by
+    // personality/government focus so nations specialize differently.
+    const weights = {
+      military: 0.6 + personality.aggression,
+      economic: 0.6 + personality.economicFocus,
+      industrial: 0.8,
+      medical: 0.5,
+    };
+    // Government type layers a structural research focus on top of personality
+    // (e.g. a Technocracy chases economic tech regardless of the individual
+    // ruler's personality roll; a Military Junta chases military tech).
+    const govTechFocus = govProfile(country.government).techFocus;
+    for (const [category, bonus] of Object.entries(govTechFocus)) {
+      if (weights[category] != null) weights[category] += bonus;
+    }
+
+    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+
+    while (technology.researchPoints >= CONFIG.RESEARCH_TECH_THRESHOLD) {
+      technology.researchPoints -= CONFIG.RESEARCH_TECH_THRESHOLD;
+      const category = weightedPick(
+        Object.entries(weights).map(([k, w]) => [k, w])
+      );
+      const before = technology.levels[category];
+      technology.levels[category] = clamp(before + 1, 0, CONFIG.MAX_TECH_LEVEL);
+      if (technology.levels[category] !== before && technology.levels[category] % 10 === 0) {
+        HistorySystem.log(world, {
+          countryId: country.id,
+          type: "tech_breakthrough",
+          description: `${country.name} reached level ${technology.levels[category]} in ${category} technology.`,
+          data: { category, level: technology.levels[category] },
+        });
+      }
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Military system
+// ---------------------------------------------------------------------------
+const MilitarySystem = {
+  tickCountry(country, world) {
+    const { military, technology, population, economy } = country;
+    const spend = country._militarySpend ?? 0;
+
+    // Equipment quality trends toward what sustained spending can support
+    const supportableQuality = clamp(
+      20 + (spend / Math.max(1, population.total)) * 4000 + technology.levels.military * 0.3,
+      0,
+      100
+    );
+    military.equipmentQuality = lerp(military.equipmentQuality, supportableQuality, 0.08);
+
+    // Manpower drawn from population, bounded by willingness (stability, government)
+    const draftCeiling = Math.floor(population.total * 0.02);
+    const draftPressure = spend > 0 ? 0.002 : -0.004;
+    military.manpower = clamp(
+      Math.round(military.manpower * (1 + draftPressure)),
+      Math.floor(population.total * 0.003),
+      draftCeiling
+    );
+
+    // Unit construction: spend converts into standing units, but every unit
+    // type consumes personnel from the manpower pool. A country cannot field
+    // more units than its manpower can crew, regardless of budget.
+    const buildBudget = spend * 0.6;
+    const unitCostCurrency = { infantry: 1200, armor: 45000, navy: 90000, airforce: 70000 };
+    const unitCostPersonnel = { infantry: 1, armor: 4, navy: 20, airforce: 8 };
+    const buildWeights =
+      military.doctrine === "Offensive"
+        ? { infantry: 0.3, armor: 0.35, navy: 0.15, airforce: 0.2 }
+        : military.doctrine === "Defensive"
+        ? { infantry: 0.45, armor: 0.2, navy: 0.2, airforce: 0.15 }
+        : { infantry: 0.35, armor: 0.25, navy: 0.2, airforce: 0.2 };
+
+    const currentPersonnelUsed = Object.keys(unitCostPersonnel).reduce(
+      (sum, type) => sum + military.units[type] * unitCostPersonnel[type],
+      0
+    );
+    let availablePersonnel = Math.max(0, military.manpower - currentPersonnelUsed);
+
+    for (const type of Object.keys(unitCostCurrency)) {
+      const allocated = buildBudget * buildWeights[type];
+      const affordableByBudget = Math.floor(allocated / unitCostCurrency[type]);
+      const personnelShare = availablePersonnel * buildWeights[type];
+      const affordableByPersonnel = Math.floor(personnelShare / unitCostPersonnel[type]);
+      const newUnits = Math.max(0, Math.min(affordableByBudget, affordableByPersonnel));
+      if (newUnits > 0) {
+        military.units[type] += newUnits;
+        availablePersonnel -= newUnits * unitCostPersonnel[type];
+      }
+    }
+
+    // Attrition: unmaintained units slowly decay if spend is chronically low
+    if (spend < population.total * 0.00002) {
+      for (const type of Object.keys(military.units)) {
+        military.units[type] = Math.max(0, Math.floor(military.units[type] * 0.995));
+      }
+    }
+
+    // Morale responds to war outcomes (adjusted elsewhere on combat), decays toward 60 baseline
+    military.morale = lerp(military.morale, 60, 0.02);
+
+    // Derived strength score used by AI + combat resolution
+    const unitScore =
+      military.units.infantry * 1 +
+      military.units.armor * 6 +
+      military.units.navy * 5 +
+      military.units.airforce * 7;
+    military.strength =
+      unitScore *
+      (0.4 + military.equipmentQuality / 100) *
+      (0.4 + technology.levels.military / 100) *
+      (0.5 + military.morale / 100);
+  },
+
+  // Resolve one tick of combat for an active war between two countries.
+  resolveCombatTick(world, war) {
+    const a = world.get(war.a);
+    const b = world.get(war.b);
+    if (!a || !b) return;
+
+    const strengthA = a.military.strength || 1;
+    // Home terrain gives the defending side (b — the defender at the point
+    // war was declared) a real combat advantage: mountainous ground favors
+    // whoever is dug in on it over whoever is attacking through it.
+    const strengthB = (b.military.strength || 1) * GeographySystem.defenseMultiplier(b);
+    const ratio = strengthA / (strengthA + strengthB);
+
+    // Attrition scales with the loser's relative weakness; both sides bleed.
+    const baseAttritionA = (1 - ratio) * 0.015; // A wins more if ratio high, so A takes less
+    const baseAttritionB = ratio * 0.015;
+
+    for (const [country, atr] of [
+      [a, baseAttritionA],
+      [b, baseAttritionB],
+    ]) {
+      for (const type of Object.keys(country.military.units)) {
+        country.military.units[type] = Math.max(
+          0,
+          Math.floor(country.military.units[type] * (1 - atr))
+        );
+      }
+      // War casualties shave population slightly
+      country.population.total = Math.max(
+        1000,
+        Math.round(country.population.total * (1 - atr * 0.05))
+      );
+      country.military.morale = clamp(country.military.morale - atr * 200, 5, 100);
+    }
+
+    war.exhaustionA = clamp(war.exhaustionA + (1 - ratio) * 1.6 + 0.4, 0, 100);
+    war.exhaustionB = clamp(war.exhaustionB + ratio * 1.6 + 0.4, 0, 100);
+    a.diplomacy.warExhaustion = war.exhaustionA;
+    b.diplomacy.warExhaustion = war.exhaustionB;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Diplomacy system
+// ---------------------------------------------------------------------------
+const DiplomacySystem = {
+  tickCountry(country, world) {
+    // Passive relation drift toward neutral for all known countries.
+    for (const [otherId, value] of country.diplomacy.relations.entries()) {
+      if (value > 0) {
+        country.diplomacy.relations.set(
+          otherId,
+          Math.max(0, value - CONFIG.RELATION_DRIFT_TO_NEUTRAL)
+        );
+      } else if (value < 0) {
+        country.diplomacy.relations.set(
+          otherId,
+          Math.min(0, value + CONFIG.RELATION_DRIFT_TO_NEUTRAL)
+        );
+      }
+    }
+
+    // Treaty upkeep: active alliances/trade/defense-pacts slowly build
+    // relations for as long as they hold.
+    for (const treaty of country.diplomacy.treaties) {
+      const bonus =
+        treaty.type === "defense-pact" ? CONFIG.DEFENSE_PACT_RELATION_BONUS :
+        treaty.type === "alliance" ? 0.5 :
+        treaty.type === "trade" ? 0.3 : 0.15;
+      country.adjustRelation(treaty.withId, bonus);
+    }
+
+    // Sanction upkeep: an active sanction is itself an ongoing source of
+    // friction, not just a one-time hit — relations keep sliding while it
+    // remains in force, on both the imposing and receiving side.
+    if (country.diplomacy.sanctions.size > 0) {
+      for (const targetId of country.diplomacy.sanctions.keys()) {
+        country.adjustRelation(targetId, CONFIG.SANCTION_UPKEEP_RELATION_DRAG);
+      }
+    }
+  },
+
+  proposeTreaty(world, fromId, toId, type) {
+    const from = world.get(fromId);
+    const to = world.get(toId);
+    if (!from || !to || from.diplomacy.atWarWith.has(toId)) return false;
+    if (from.hasTreaty(type, toId)) return false;
+    // Deeper commitments can't be formed while either side is actively
+    // sanctioning the other — a real diplomatic contradiction. Trade is
+    // exempted: even hostile nations occasionally re-open limited trade,
+    // and a trade proposal under sanction will simply run into the low
+    // acceptChance below rather than being flatly disallowed.
+    if (
+      type !== "trade" &&
+      (from.hasSanctionOn(toId) || to.hasSanctionOn(fromId))
+    ) {
+      return false;
+    }
+    // A defense pact is a deepening of an existing alliance, not a
+    // standalone treaty — it requires the alliance to already be in place.
+    if (type === "defense-pact" && !from.hasTreaty("alliance", toId)) {
+      return false;
+    }
+
+    const relation = from.relationWith(toId);
+    const requiredRelation = {
+      alliance: 40,
+      "non-aggression": 5,
+      trade: -10,
+      "defense-pact": CONFIG.DEFENSE_PACT_REQUIRED_RELATION,
+    }[type] ?? 0;
+    const acceptChance = clamp(
+      0.5 + (relation - requiredRelation) / 100 + to.personality.diplomacy * 0.2,
+      0.02,
+      0.95
+    );
+
+    if (Math.random() < acceptChance) {
+      const now = world.tick;
+      from.diplomacy.treaties.push({ type, withId: toId, sinceTick: now });
+      to.diplomacy.treaties.push({ type, withId: fromId, sinceTick: now });
+      from.adjustRelation(toId, type === "defense-pact" ? 15 : 10);
+      to.adjustRelation(fromId, type === "defense-pact" ? 15 : 10);
+      HistorySystem.log(world, {
+        countryId: fromId,
+        type: "treaty_signed",
+        description: `${from.name} and ${to.name} signed a ${type} agreement.`,
+        data: { type, with: toId },
+      });
+      return true;
+    }
+    return false;
+  },
+
+  // Impose a real, one-directional economic-pressure measure short of war.
+  // Effects (all mechanical, resolved elsewhere so this stays the single
+  // point of state mutation):
+  //   - immediate + ongoing relations cost on both sides (tickCountry)
+  //   - bilateral trade route efficiency is slashed, not zeroed
+  //     (TradeSystem.tickWorld)
+  //   - the target's GDP takes a broader isolation penalty that scales with
+  //     how many nations are sanctioning it at once (EconomySystem)
+  imposeSanction(world, imposerId, targetId, reason = "diplomatic dispute") {
+    const imposer = world.get(imposerId);
+    const target = world.get(targetId);
+    if (!imposer || !target || imposerId === targetId) return false;
+    if (imposer.hasSanctionOn(targetId)) return false;
+    if (imposer.diplomacy.atWarWith.has(targetId)) return false; // war already supersedes this
+
+    const now = world.tick;
+    const record = { sinceTick: now, reason };
+    imposer.diplomacy.sanctions.set(targetId, record);
+    target.diplomacy.sanctionedBy.set(imposerId, record);
+    imposer.adjustRelation(targetId, CONFIG.SANCTION_INITIAL_RELATION_PENALTY);
+    target.adjustRelation(imposerId, CONFIG.SANCTION_INITIAL_RELATION_PENALTY);
+
+    HistorySystem.log(world, {
+      countryId: imposerId,
+      type: "sanctions_imposed",
+      description: `${imposer.name} imposed sanctions on ${target.name} (${reason}).`,
+      data: { target: targetId, reason },
+    });
+    return true;
+  },
+
+  liftSanction(world, imposerId, targetId) {
+    const imposer = world.get(imposerId);
+    const target = world.get(targetId);
+    if (!imposer || !target) return false;
+    if (!imposer.hasSanctionOn(targetId)) return false;
+
+    imposer.diplomacy.sanctions.delete(targetId);
+    target.diplomacy.sanctionedBy.delete(imposerId);
+    // Lifting sanctions is a real, if modest, goodwill gesture.
+    imposer.adjustRelation(targetId, 6);
+    target.adjustRelation(imposerId, 6);
+
+    HistorySystem.log(world, {
+      countryId: imposerId,
+      type: "sanctions_lifted",
+      description: `${imposer.name} lifted sanctions on ${target.name}.`,
+      data: { target: targetId },
+    });
+    return true;
+  },
+
+  declareWar(world, aggressorId, defenderId) {
+    const aggressor = world.get(aggressorId);
+    const defender = world.get(defenderId);
+    if (!aggressor || !defender) return false;
+    if (aggressor.diplomacy.atWarWith.has(defenderId)) return false;
+
+    aggressor.diplomacy.atWarWith.add(defenderId);
+    defender.diplomacy.atWarWith.add(aggressorId);
+    aggressor.adjustRelation(defenderId, -40);
+    defender.adjustRelation(aggressorId, -40);
+
+    // Breaking a non-aggression pact carries a further relations penalty and
+    // damages the aggressor's standing with third parties who share treaties
+    // with the defender (a real, if simple, alliance-reputation effect).
+    aggressor.diplomacy.treaties = aggressor.diplomacy.treaties.filter(
+      (t) => !(t.type === "non-aggression" && t.withId === defenderId)
+    );
+    defender.diplomacy.treaties = defender.diplomacy.treaties.filter(
+      (t) => !(t.type === "non-aggression" && t.withId === aggressorId)
+    );
+
+    for (const treaty of defender.diplomacy.treaties) {
+      if (treaty.type === "alliance" || treaty.type === "defense-pact") {
+        const ally = world.get(treaty.withId);
+        if (ally && ally.id !== aggressorId) {
+          ally.adjustRelation(aggressorId, -15);
+        }
+      }
+    }
+
+    const warId = uid("war");
+    world.wars.set(warId, {
+      id: warId,
+      a: aggressorId,
+      b: defenderId,
+      startTick: world.tick,
+      exhaustionA: 0,
+      exhaustionB: 0,
+    });
+
+    HistorySystem.log(world, {
+      countryId: aggressorId,
+      type: "war_declared",
+      description: `${aggressor.name} declared war on ${defender.name}.`,
+      data: { defender: defenderId },
+    });
+
+    // Mutual defense obligations: only the *defender's* defense-pact
+    // partners are called on — a defense pact is triggered by being
+    // attacked, not by backing a partner's war of choice. Each partner
+    // decides independently whether to honor it.
+    this._triggerDefensePacts(world, aggressorId, defenderId);
+
+    return warId;
+  },
+
+  // Each of the defender's defense-pact partners weighs honoring the pact:
+  // real factors (relation with the defender, relative strength against the
+  // aggressor, personality, government posture) rather than a coin flip.
+  // Honoring opens a genuine, separate bilateral war against the aggressor
+  // (resolved by the same MilitarySystem/DiplomacySystem machinery as any
+  // other war) — declining carries its own real relations cost.
+  _triggerDefensePacts(world, aggressorId, defenderId) {
+    const defender = world.get(defenderId);
+    const aggressor = world.get(aggressorId);
+    if (!defender || !aggressor) return;
+
+    const partners = defender.diplomacy.treaties
+      .filter((t) => t.type === "defense-pact")
+      .map((t) => t.withId);
+
+    for (const allyId of partners) {
+      if (allyId === aggressorId) continue;
+      const ally = world.get(allyId);
+      if (!ally || !ally.alive) continue;
+      if (ally.diplomacy.atWarWith.has(aggressorId)) continue; // already at war with them
+
+      const relationWithDefender = ally.relationWith(defenderId);
+      const relationWithAggressor = ally.relationWith(aggressorId);
+      const strengthRatio =
+        ally.military.strength / Math.max(1, aggressor.military.strength);
+      const gov = govProfile(ally.government);
+      const leader = ally.leader;
+      const leaderThink = leader ? LEADER_ARCHETYPES[leader.archetype]?.think : null;
+      const leaderTraits = leader?.traits;
+
+      let joinChance =
+        CONFIG.DEFENSE_PACT_JOIN_BASE_CHANCE +
+        relationWithDefender / 200 -
+        relationWithAggressor / 200 +
+        ally.personality.diplomacy * 0.1 - // honoring commitments is itself a diplomatic value
+        ally.personality.isolationism * 0.3 +
+        clamp(strengthRatio - 1, -0.3, 0.3) * 0.25 +
+        gov.warBias * 0.3 -
+        (ally.diplomacy.atWarWith.size > 0 ? 0.35 : 0); // already fighting elsewhere
+      // A leader's own war-scoring instincts color whether joining a
+      // defensive war reads as attractive, same hook used for wars of
+      // choice elsewhere in the engine.
+      joinChance = leaderThink?.warScore?.(ally, aggressor, world, joinChance, leaderTraits) ?? joinChance;
+      joinChance = clamp(joinChance, 0.05, 0.9);
+
+      if (Math.random() < joinChance) {
+        this.declareWar(world, allyId, aggressorId);
+        ally.adjustRelation(defenderId, CONFIG.DEFENSE_PACT_HONOR_RELATION_BONUS);
+        defender.adjustRelation(allyId, CONFIG.DEFENSE_PACT_HONOR_RELATION_BONUS);
+        HistorySystem.log(world, {
+          countryId: allyId,
+          type: "defense_pact_honored",
+          description: `${ally.name} honored its defense pact with ${defender.name}, entering the war against ${aggressor.name}.`,
+          data: { defender: defenderId, aggressor: aggressorId },
+        });
+      } else {
+        defender.adjustRelation(allyId, CONFIG.DEFENSE_PACT_DECLINE_RELATION_PENALTY);
+        ally.adjustRelation(defenderId, CONFIG.DEFENSE_PACT_DECLINE_RELATION_PENALTY / 2);
+        HistorySystem.log(world, {
+          countryId: allyId,
+          type: "defense_pact_declined",
+          description: `${ally.name} declined to invoke its defense pact with ${defender.name} against ${aggressor.name}.`,
+          data: { defender: defenderId, aggressor: aggressorId },
+        });
+      }
+    }
+  },
+
+  negotiatePeace(world, warId) {
+    const war = world.wars.get(warId);
+    if (!war) return false;
+    const a = world.get(war.a);
+    const b = world.get(war.b);
+    if (a) {
+      a.diplomacy.atWarWith.delete(war.b);
+      a.diplomacy.warExhaustion = 0;
+    }
+    if (b) {
+      b.diplomacy.atWarWith.delete(war.a);
+      b.diplomacy.warExhaustion = 0;
+    }
+    world.wars.delete(warId);
+    HistorySystem.log(world, {
+      countryId: war.a,
+      type: "peace_treaty",
+      description: `${a ? a.name : war.a} and ${b ? b.name : war.b} signed a peace treaty.`,
+      data: { a: war.a, b: war.b },
+    });
+    return true;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// AI decision engine
+// ---------------------------------------------------------------------------
+const AIDecisionEngine = {
+  // Produces a scored list of candidate actions for a country and applies
+  // the top N (CONFIG.AI_ACTIONS_PER_TICK) each tick.
+  decide(country, world) {
+    const candidates = [];
+    const others = world.countryList().filter((c) => c.id !== country.id);
+    const gov = govProfile(country.government);
+    // The leader's archetype supplies "think" hooks that reshape scoring and
+    // gate candidates outright — see the Leadership subsystem comment block
+    // for what each hook does. leaderThink is undefined for any country that
+    // (transiently) has no leader assigned; every call site below tolerates
+    // that via optional chaining and falls back to the government/personality
+    // -driven baseline.
+    const leader = country.leader;
+    const leaderThink = leader ? LEADER_ARCHETYPES[leader.archetype]?.think : null;
+    const leaderTraits = leader?.traits;
+
+    // --- Budget rebalancing ---
+    candidates.push(...this._budgetOptions(country));
+
+    // --- Treaty proposals ---
+    for (const other of others) {
+      const relation = country.relationWith(other.id);
+      if (
+        !country.diplomacy.atWarWith.has(other.id) &&
+        !country.hasTreaty("non-aggression", other.id) &&
+        relation > -20
+      ) {
+        let score =
+          0.3 + country.personality.diplomacy * 0.4 + relation / 200 -
+          country.personality.isolationism * 0.3 + gov.diplomacyBias;
+        score = leaderThink?.treatyScore?.(country, other, "non-aggression", score, leaderTraits) ?? score;
+        candidates.push({
+          action: "propose_treaty",
+          targetId: other.id,
+          treatyType: "non-aggression",
+          score,
+        });
+      }
+      if (
+        !country.diplomacy.atWarWith.has(other.id) &&
+        !country.hasTreaty("alliance", other.id) &&
+        relation > 45
+      ) {
+        let score =
+          0.35 + country.personality.diplomacy * 0.5 + relation / 150 -
+          country.personality.isolationism * 0.4 + gov.diplomacyBias;
+        score = leaderThink?.treatyScore?.(country, other, "alliance", score, leaderTraits) ?? score;
+        candidates.push({
+          action: "propose_treaty",
+          targetId: other.id,
+          treatyType: "alliance",
+          score,
+        });
+      }
+      if (
+        !country.diplomacy.atWarWith.has(other.id) &&
+        !country.hasTreaty("trade", other.id) &&
+        relation > -10
+      ) {
+        let score =
+          0.25 + country.personality.economicFocus * 0.4 -
+          country.personality.isolationism * 0.3 + gov.diplomacyBias * 0.5;
+        score = leaderThink?.treatyScore?.(country, other, "trade", score, leaderTraits) ?? score;
+        candidates.push({
+          action: "propose_treaty",
+          targetId: other.id,
+          treatyType: "trade",
+          score,
+        });
+      }
+      // Defense pacts deepen an existing alliance once trust is high enough
+      // — gated the same way in DiplomacySystem.proposeTreaty, but checked
+      // here too so a low-scoring, doomed proposal isn't wastefully queued.
+      if (
+        !country.diplomacy.atWarWith.has(other.id) &&
+        country.hasTreaty("alliance", other.id) &&
+        !country.hasTreaty("defense-pact", other.id) &&
+        relation > CONFIG.DEFENSE_PACT_REQUIRED_RELATION - 15
+      ) {
+        let score =
+          0.3 + country.personality.diplomacy * 0.45 + relation / 180 -
+          country.personality.isolationism * 0.35 + gov.diplomacyBias * 0.8;
+        score = leaderThink?.treatyScore?.(country, other, "defense-pact", score, leaderTraits) ?? score;
+        candidates.push({
+          action: "propose_treaty",
+          targetId: other.id,
+          treatyType: "defense-pact",
+          score,
+        });
+      }
+      // Sanctions: a pressure tool for real rivalries that haven't (yet)
+      // tipped into war — low relation, no existing alliance/defense-pact
+      // (sanctioning your own ally makes no sense), not already sanctioned.
+      if (
+        !country.diplomacy.atWarWith.has(other.id) &&
+        !country.hasSanctionOn(other.id) &&
+        !country.hasTreaty("alliance", other.id) &&
+        !country.hasTreaty("defense-pact", other.id) &&
+        relation < -35
+      ) {
+        let score =
+          0.2 + gov.diplomacyBias * 0.6 - gov.warBias * 0.3 +
+          country.personality.diplomacy * 0.3 -
+          country.personality.aggression * 0.25 + // the highly aggressive skip straight to war
+          -relation / 150;
+        score = leaderThink?.treatyScore?.(country, other, "sanction", score, leaderTraits) ?? score;
+        candidates.push({
+          action: "impose_sanction",
+          targetId: other.id,
+          score,
+        });
+      }
+      // Lifting a sanction once relations have genuinely recovered, or once
+      // the imposer's own economy is under enough strain that the ongoing
+      // trade friction looks like self-harm.
+      if (country.hasSanctionOn(other.id)) {
+        const strained = country.economy.debt > country.economy.gdp * 0.4;
+        if (relation > CONFIG.SANCTION_LIFT_RELATION_THRESHOLD || strained) {
+          let score =
+            0.25 + (relation - CONFIG.SANCTION_LIFT_RELATION_THRESHOLD) / 100 +
+            (strained ? 0.25 : 0) + gov.diplomacyBias * 0.4;
+          score = leaderThink?.treatyScore?.(country, other, "sanction-lift", score, leaderTraits) ?? score;
+          candidates.push({
+            action: "lift_sanction",
+            targetId: other.id,
+            score,
+          });
+        }
+      }
+    }
+
+    // --- War consideration ---
+    for (const other of others) {
+      if (country.diplomacy.atWarWith.has(other.id)) continue;
+      if (country.hasTreaty("alliance", other.id)) continue;
+      // The leader's warGate hook is a hard filter evaluated before scoring:
+      // a Statesman or Guardian can rule a target out as a war of choice
+      // entirely, regardless of how favorable the numbers below would score
+      // it. Archetypes without a warGate hook impose no extra restriction.
+      if (leaderThink?.warGate && !leaderThink.warGate(country, other, world, leaderTraits)) continue;
+
+      const relation = country.relationWith(other.id);
+      const strengthRatio =
+        country.military.strength / Math.max(1, other.military.strength);
+      const hasNAP = country.hasTreaty("non-aggression", other.id);
+
+      let warScore =
+        country.personality.aggression * 0.6 +
+        country.personality.opportunism * 0.4 * clamp(strengthRatio - 1, 0, 2) -
+        relation / 60 -
+        country.personality.diplomacy * 0.3 -
+        (hasNAP ? 0.5 : 0) -
+        (country.population.stability < 40 ? 0.4 : 0) -
+        (country.diplomacy.atWarWith.size > 0 ? 0.6 : 0) +
+        gov.warBias;
+      warScore = leaderThink?.warScore?.(country, other, world, warScore, leaderTraits) ?? warScore;
+
+      if (warScore > 0.35 && strengthRatio > 1.1) {
+        candidates.push({
+          action: "declare_war",
+          targetId: other.id,
+          score: warScore,
+        });
+      }
+    }
+
+    // --- Peace consideration for active wars ---
+    for (const [warId, war] of world.wars.entries()) {
+      const isA = war.a === country.id;
+      const isB = war.b === country.id;
+      if (!isA && !isB) continue;
+      const myExhaustion = isA ? war.exhaustionA : war.exhaustionB;
+      // A leader's peaceThreshold hook replaces the flat config constant —
+      // a Hawk will fight on well past where a Steward or Statesman settles.
+      const peaceThreshold = leaderThink?.peaceThreshold?.(country, war, leaderTraits)
+        ?? CONFIG.WAR_EXHAUSTION_PEACE_THRESHOLD;
+      if (myExhaustion > peaceThreshold) {
+        candidates.push({
+          action: "seek_peace",
+          warId,
+          score: 0.4 + (myExhaustion - peaceThreshold) / 60,
+        });
+      }
+    }
+
+    // --- Doctrine switching ---
+    // A leader with a doctrine hook can force a preferred posture outright;
+    // otherwise the doctrine follows the nation's aggression personality as
+    // before.
+    const desiredDoctrine =
+      leaderThink?.doctrine?.(country, leaderTraits) ??
+      (country.personality.aggression > 0.6
+        ? "Offensive"
+        : country.personality.aggression < 0.35
+        ? "Defensive"
+        : "Balanced");
+    if (country.military.doctrine !== desiredDoctrine) {
+      candidates.push({
+        action: "set_doctrine",
+        doctrine: desiredDoctrine,
+        score: 0.2,
+      });
+    }
+
+    candidates.sort((x, y) => y.score - x.score);
+    return candidates.slice(0, CONFIG.AI_ACTIONS_PER_TICK);
+  },
+
+  _budgetOptions(country) {
+    const opts = [];
+    const b = country.economy.budget;
+    const p = country.personality;
+    const gov = govProfile(country.government);
+    const leader = country.leader;
+    const leaderThink = leader ? LEADER_ARCHETYPES[leader.archetype]?.think : null;
+    const leaderTraits = leader?.traits;
+
+    const pressures = {
+      military:
+        0.2 +
+        p.aggression * 0.3 +
+        (country.diplomacy.atWarWith.size > 0 ? 0.4 : 0) -
+        b.military * 0.5 +
+        gov.budgetBias.military,
+      research: 0.2 + p.economicFocus * 0.2 - b.research * 0.5 + gov.budgetBias.research,
+      infrastructure:
+        0.2 + (1 - p.aggression) * 0.15 - b.infrastructure * 0.5 + gov.budgetBias.infrastructure,
+      welfare:
+        0.2 +
+        (country.population.unrest > 50 ? 0.4 : 0) +
+        (country.population.stability < 45 ? 0.3 : 0) -
+        b.welfare * 0.5 +
+        gov.budgetBias.welfare,
+    };
+
+    for (const [category, basePressure] of Object.entries(pressures)) {
+      const pressure = leaderThink?.budgetPressure?.(country, category, basePressure, leaderTraits) ?? basePressure;
+      if (pressure > 0.15) {
+        opts.push({ action: "adjust_budget", category, score: pressure });
+      }
+    }
+    return opts;
+  },
+
+  applyAction(world, country, action) {
+    switch (action.action) {
+      case "adjust_budget": {
+        const b = country.economy.budget;
+        const step = 0.03;
+        const categories = ["military", "research", "infrastructure", "welfare"];
+        const others = categories.filter((c) => c !== action.category);
+        b[action.category] = clamp(b[action.category] + step, 0.05, 0.6);
+        const excess =
+          b.military + b.research + b.infrastructure + b.welfare - 1;
+        if (excess > 0) {
+          for (const c of others) {
+            b[c] = clamp(b[c] - excess / others.length, 0.05, 0.6);
+          }
+        }
+        break;
+      }
+      case "propose_treaty":
+        DiplomacySystem.proposeTreaty(world, country.id, action.targetId, action.treatyType);
+        break;
+      case "impose_sanction":
+        DiplomacySystem.imposeSanction(world, country.id, action.targetId, "deteriorating relations");
+        break;
+      case "lift_sanction":
+        DiplomacySystem.liftSanction(world, country.id, action.targetId);
+        break;
+      case "declare_war":
+        DiplomacySystem.declareWar(world, country.id, action.targetId);
+        break;
+      case "seek_peace": {
+        const war = world.wars.get(action.warId);
+        if (!war) break;
+        const otherId = war.a === country.id ? war.b : war.a;
+        const other = world.get(otherId);
+        const otherExhaustion = war.a === country.id ? war.exhaustionB : war.exhaustionA;
+        // Peace requires the other side to also be reasonably exhausted, or
+        // for the proposer to be badly overmatched — otherwise it's refused.
+        const strengthRatio =
+          country.military.strength / Math.max(1, other?.military.strength ?? 1);
+        if (otherExhaustion > 30 || strengthRatio < 0.5) {
+          DiplomacySystem.negotiatePeace(world, action.warId);
+        }
+        break;
+      }
+      case "set_doctrine":
+        country.military.doctrine = action.doctrine;
+        break;
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// World events system — condition-triggered, mechanically real effects.
+// ---------------------------------------------------------------------------
+const EventSystem = {
+  checkEvents(world) {
+    for (const country of world.countryList()) {
+      this._checkFamine(world, country);
+      this._checkWaterCrisis(world, country);
+      this._checkDisaster(world, country);
+      this._checkRevolution(world, country);
+      this._checkEconomicBoom(world, country);
+    }
+    this._checkWarResolutions(world);
+  },
+
+  _checkFamine(world, country) {
+    if (country.economy.resources.food.stock <= 0 && country.population.stability < 60) {
+      const lossPct = rand(0.5, 1.5);
+      country.population.total = Math.max(
+        1000,
+        Math.round(country.population.total * (1 - lossPct / 100))
+      );
+      country.population.stability = clamp(country.population.stability - 4, 0, 100);
+      country.population.unrest = clamp(country.population.unrest + 6, 0, 100);
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "famine",
+        description: `Famine strikes ${country.name} as food reserves collapse. Population declines and unrest grows.`,
+        data: { lossPct },
+      });
+    }
+  },
+
+  // Mirrors _checkFamine's shape and severity: running dry on freshwater is
+  // as real a crisis as running dry on food, so it gets the same population/
+  // stability/unrest consequences rather than being a second-class resource.
+  _checkWaterCrisis(world, country) {
+    if (country.economy.resources.water.stock <= 0 && country.population.stability < 60) {
+      const lossPct = rand(0.4, 1.2);
+      country.population.total = Math.max(
+        1000,
+        Math.round(country.population.total * (1 - lossPct / 100))
+      );
+      country.population.stability = clamp(country.population.stability - 4, 0, 100);
+      country.population.unrest = clamp(country.population.unrest + 6, 0, 100);
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "water_crisis",
+        description: `${country.name} faces a freshwater crisis as reserves run dry. Population declines and unrest grows.`,
+        data: { lossPct },
+      });
+    }
+  },
+
+  _checkDisaster(world, country) {
+    const disasterExposure = GeographySystem.getModifiers(country).disasterExposure;
+    const chance = CONFIG.DISASTER_BASE_CHANCE * (0.5 + disasterExposure);
+    if (Math.random() < chance) {
+      const kind = weightedPick([
+        ["earthquake", 1],
+        ["flood", 1],
+        ["drought", 1],
+        ["storm", 1],
+      ]);
+      const infraLoss = rand(2, 6);
+      country.technology.levels.industrial = clamp(
+        country.technology.levels.industrial - infraLoss * 0.1,
+        0,
+        CONFIG.MAX_TECH_LEVEL
+      );
+      country.economy.resources.food.stock = Math.max(
+        0,
+        country.economy.resources.food.stock * (1 - rand(0.1, 0.3))
+      );
+      // Drought hits water reserves directly rather than food; the other
+      // three disaster kinds still carry some water-infrastructure damage
+      // (broken pipes/wells, flooded or contaminated supply), just lighter.
+      const waterLossPct = kind === "drought" ? rand(0.2, 0.4) : rand(0.05, 0.15);
+      country.economy.resources.water.stock = Math.max(
+        0,
+        country.economy.resources.water.stock * (1 - waterLossPct)
+      );
+      country.population.stability = clamp(country.population.stability - rand(3, 8), 0, 100);
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "natural_disaster",
+        description: `A ${kind} strikes ${country.name}, damaging infrastructure and food and water reserves.`,
+        data: { kind },
+      });
+    }
+  },
+
+  _checkRevolution(world, country) {
+    if (country.population.consecutiveHighUnrestTicks >= CONFIG.UNREST_REVOLUTION_TICKS) {
+      const oldGov = country.government;
+      const oldProfile = govProfile(oldGov);
+
+      // Successor government follows a weighted, government-specific
+      // trajectory (see GOVERNMENT_PROFILES.revolutionTargets) rather than a
+      // uniform pick across every government type — a Constitutional
+      // Monarchy is far more likely to end up a Democracy than a Military
+      // Junta, for instance.
+      const targets = oldProfile.revolutionTargets.filter(([g]) => g !== oldGov);
+      country.government =
+        targets.length > 0
+          ? weightedPick(targets)
+          : GOVERNMENTS.filter((g) => g !== oldGov)[randInt(0, GOVERNMENTS.length - 2)];
+
+      // Suppressed pressure banked by a coercive regime makes its overthrow
+      // more violent: harder-suppressing governments crash further and lose
+      // more of their military/treasury base when the lid finally comes off.
+      const severity = 1 + clamp(country.population.suppressedPressure / 100, 0, 1);
+      country.population.stability = clamp(30 + rand(-5, 5) - 10 * (severity - 1), 0, 100);
+      country.population.unrest = clamp(25 + rand(-5, 5) + 15 * (severity - 1), 0, 100);
+      country.population.consecutiveHighUnrestTicks = 0;
+      country.population.suppressedPressure = 0;
+      // Revolutionary upheaval costs military cohesion and treasury, scaled
+      // by how much pressure had been bottled up.
+      country.military.morale = clamp(country.military.morale - 20 * severity, 5, 100);
+      country.economy.treasury *= clamp(0.6 / severity, 0.2, 0.6);
+      const unitLossFactor = clamp(0.85 - 0.1 * (severity - 1), 0.5, 0.85);
+      for (const type of Object.keys(country.military.units)) {
+        country.military.units[type] = Math.floor(country.military.units[type] * unitLossFactor);
+      }
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "revolution",
+        description: `Sustained unrest topples the government of ${country.name}. It transitions from a ${oldGov} to a ${country.government}.`,
+        data: { from: oldGov, to: country.government, severity },
+      });
+
+      // The old regime's leader goes down with it; the new government
+      // installs its own successor, drawn from the archetype pool that
+      // fits the *new* government type (pickArchetypeFor reads
+      // country.government, which has already been updated above).
+      LeadershipSystem.succeed(world, country, "revolution");
+    }
+  },
+
+  _checkEconomicBoom(world, country) {
+    if (
+      country.economy.lastGdpGrowthPct > 3 &&
+      country.population.stability > 70 &&
+      Math.random() < 0.04
+    ) {
+      country.economy.treasury += country.economy.gdp * 0.01;
+      HistorySystem.log(world, {
+        countryId: country.id,
+        type: "economic_boom",
+        description: `${country.name} experiences an economic boom, boosting treasury reserves.`,
+        data: {},
+      });
+    }
+  },
+
+  _checkWarResolutions(world) {
+    // Auto-resolve wars where one side has been effectively neutralized.
+    for (const [warId, war] of Array.from(world.wars.entries())) {
+      const a = world.get(war.a);
+      const b = world.get(war.b);
+      if (!a || !b) {
+        world.wars.delete(warId);
+        continue;
+      }
+      if (a.military.strength < 5 || b.military.strength < 5) {
+        DiplomacySystem.negotiatePeace(world, warId);
+      }
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Simulation clock — orchestrates one full tick across all systems in a
+// fixed, well-defined order so effects compose predictably.
+// ---------------------------------------------------------------------------
+const SimulationClock = {
+  tick(world) {
+    world.advanceCalendar();
+
+    for (const country of world.countryList()) {
+      EconomySystem.tickCountry(country, world);
+      PopulationSystem.tickCountry(country, world);
+      TechnologySystem.tickCountry(country, world);
+      MilitarySystem.tickCountry(country, world);
+      DiplomacySystem.tickCountry(country, world);
+      LeadershipSystem.tickCountry(world, country);
+    }
+
+    // Resolve physical trade flows for every active trade treaty, gated by
+    // real route feasibility (shared border or shared coastline).
+    TradeSystem.tickWorld(world);
+
+    // Combat resolution for all active wars, using freshly computed strengths.
+    for (const war of world.wars.values()) {
+      MilitarySystem.resolveCombatTick(world, war);
+    }
+
+    // AI decisions, applied after state settles for the tick.
+    for (const country of world.countryList()) {
+      const actions = AIDecisionEngine.decide(country, world);
+      for (const action of actions) {
+        AIDecisionEngine.applyAction(world, country, action);
+      }
+    }
+
+    EventSystem.checkEvents(world);
+
+    return world;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// World generation — builds the starting scenario.
+// ---------------------------------------------------------------------------
+// Geography forms a single connected continent: every "neighbors" entry only
+// needs to be authored once per pair (GeographySystem.normalizeBorders makes
+// it symmetric at world creation). baseResources carry over the same raw
+// endowment values nations shipped with in Phase 1 — geography now derives
+// *effective* production from them via terrain + climate, it doesn't replace
+// the underlying balance.
+const STARTING_NATIONS = [
+  {
+    id: "valtoria",
+    name: "Valtoria",
+    government: "Democracy",
+    personality: { aggression: 0.4, diplomacy: 0.6, economicFocus: 0.6, isolationism: 0.2, opportunism: 0.4 },
+    geography: {
+      terrain: { mountains: 0.15, plains: 0.60, coastal: 0.60 },
+      climate: "Temperate",
+      hasRiver: true,
+      riverAccess: 0.6,
+      // Valtoria: a coastal energy/water power — strong oil & gas and ample
+      // freshwater, but poor in hard minerals across the board.
+      baseResources: {
+        fertility: 0.5, mineralWealth: 0.4, energyPotential: 0.8,
+        oilReserves: 0.7, gasReserves: 0.6, coalDeposits: 0.2,
+        uraniumDeposits: 0.15, rareEarthDeposits: 0.1, freshwaterAvailability: 0.7,
+      },
+      disasterExposureBase: 0.3,
+      neighbors: ["kestrelan", "drovnark", "calderra"],
+    },
+    startPop: 42_000_000,
+    startGdpPerCapita: 1200,
+  },
+  {
+    id: "kestrelan",
+    name: "Kestrelan Federation",
+    government: "Federation",
+    personality: { aggression: 0.25, diplomacy: 0.8, economicFocus: 0.5, isolationism: 0.1, opportunism: 0.3 },
+    geography: {
+      terrain: { mountains: 0.45, plains: 0.35, coastal: 0.50 },
+      climate: "Temperate",
+      hasRiver: true,
+      riverAccess: 0.4,
+      // Kestrelan: mountainous mining power — coal, uranium, and rare earths
+      // all strong, but weak on oil/gas (no real deposits to speak of).
+      baseResources: {
+        fertility: 0.6, mineralWealth: 0.8, energyPotential: 0.4,
+        oilReserves: 0.2, gasReserves: 0.2, coalDeposits: 0.7,
+        uraniumDeposits: 0.5, rareEarthDeposits: 0.4, freshwaterAvailability: 0.5,
+      },
+      disasterExposureBase: 0.2,
+      neighbors: ["valtoria", "ashvale", "norrvik"],
+    },
+    startPop: 58_000_000,
+    startGdpPerCapita: 1100,
+  },
+  {
+    id: "drovnark",
+    name: "Drovnark",
+    government: "Military Junta",
+    personality: { aggression: 0.85, diplomacy: 0.2, economicFocus: 0.4, isolationism: 0.3, opportunism: 0.7 },
+    geography: {
+      terrain: { mountains: 0.60, plains: 0.20, coastal: 0 },
+      climate: "Continental",
+      hasRiver: false,
+      riverAccess: 0,
+      // Drovnark: harsh, landlocked, aggressive — decent coal/uranium from
+      // its mountains, but thin on everything else, especially freshwater.
+      baseResources: {
+        fertility: 0.3, mineralWealth: 0.5, energyPotential: 0.5,
+        oilReserves: 0.3, gasReserves: 0.2, coalDeposits: 0.6,
+        uraniumDeposits: 0.6, rareEarthDeposits: 0.3, freshwaterAvailability: 0.3,
+      },
+      disasterExposureBase: 0.4,
+      neighbors: ["valtoria", "tesqua", "sundara"],
+    },
+    startPop: 35_000_000,
+    startGdpPerCapita: 900,
+  },
+  {
+    id: "sundara",
+    name: "Sundara Republic",
+    government: "Technocracy",
+    personality: { aggression: 0.2, diplomacy: 0.55, economicFocus: 0.85, isolationism: 0.25, opportunism: 0.35 },
+    geography: {
+      terrain: { mountains: 0.20, plains: 0.30, coastal: 0.70 },
+      climate: "Arid",
+      hasRiver: false,
+      riverAccess: 0.1,
+      // Sundara: the classic petrostate — arid, coastal, oil/gas-rich, but
+      // almost no freshwater and weak hard minerals.
+      baseResources: {
+        fertility: 0.4, mineralWealth: 0.3, energyPotential: 0.6,
+        oilReserves: 0.8, gasReserves: 0.7, coalDeposits: 0.1,
+        uraniumDeposits: 0.2, rareEarthDeposits: 0.2, freshwaterAvailability: 0.2,
+      },
+      disasterExposureBase: 0.25,
+      neighbors: ["drovnark", "tesqua", "ombrisk"],
+    },
+    startPop: 30_000_000,
+    startGdpPerCapita: 1500,
+  },
+  {
+    id: "ashvale",
+    name: "Ashvale Monarchy",
+    government: "Monarchy",
+    personality: { aggression: 0.3, diplomacy: 0.4, economicFocus: 0.45, isolationism: 0.75, opportunism: 0.2 },
+    geography: {
+      terrain: { mountains: 0.10, plains: 0.75, coastal: 0.50 },
+      climate: "Tropical",
+      hasRiver: true,
+      riverAccess: 0.8,
+      // Ashvale: tropical river-agrarian nation — abundant freshwater and
+      // fertility, but almost nothing in the way of energy or minerals.
+      baseResources: {
+        fertility: 0.85, mineralWealth: 0.3, energyPotential: 0.3,
+        oilReserves: 0.1, gasReserves: 0.1, coalDeposits: 0.1,
+        uraniumDeposits: 0.05, rareEarthDeposits: 0.05, freshwaterAvailability: 0.9,
+      },
+      disasterExposureBase: 0.2,
+      neighbors: ["kestrelan", "norrvik"],
+    },
+    startPop: 22_000_000,
+    startGdpPerCapita: 850,
+  },
+  {
+    id: "norrvik",
+    name: "Norrvik Union",
+    government: "Communist State",
+    personality: { aggression: 0.3, diplomacy: 0.7, economicFocus: 0.75, isolationism: 0.1, opportunism: 0.45 },
+    geography: {
+      terrain: { mountains: 0.30, plains: 0.45, coastal: 0.60 },
+      climate: "Continental",
+      hasRiver: true,
+      riverAccess: 0.5,
+      // Norrvik: a genuine generalist — moderate across the board, but
+      // deliberately never strong enough in any one resource to skip trade.
+      baseResources: {
+        fertility: 0.5, mineralWealth: 0.5, energyPotential: 0.5,
+        oilReserves: 0.4, gasReserves: 0.5, coalDeposits: 0.4,
+        uraniumDeposits: 0.3, rareEarthDeposits: 0.3, freshwaterAvailability: 0.6,
+      },
+      disasterExposureBase: 0.3,
+      neighbors: ["kestrelan", "ashvale", "calderra", "fenwold"],
+    },
+    startPop: 27_000_000,
+    startGdpPerCapita: 1300,
+  },
+  {
+    id: "tesqua",
+    name: "Tesqua Dominion",
+    government: "Autocracy",
+    personality: { aggression: 0.7, diplomacy: 0.3, economicFocus: 0.55, isolationism: 0.2, opportunism: 0.65 },
+    geography: {
+      terrain: { mountains: 0.55, plains: 0.30, coastal: 0 },
+      climate: "Continental",
+      hasRiver: false,
+      riverAccess: 0.1,
+      // Tesqua: the continent's hard-mineral heavyweight — strong coal,
+      // uranium, and rare earths from its mountains, weak on fossil energy
+      // and freshwater.
+      baseResources: {
+        fertility: 0.4, mineralWealth: 0.75, energyPotential: 0.45,
+        oilReserves: 0.2, gasReserves: 0.2, coalDeposits: 0.7,
+        uraniumDeposits: 0.7, rareEarthDeposits: 0.6, freshwaterAvailability: 0.3,
+      },
+      disasterExposureBase: 0.35,
+      neighbors: ["drovnark", "sundara", "calderra"],
+    },
+    startPop: 48_000_000,
+    startGdpPerCapita: 950,
+  },
+  {
+    id: "calderra",
+    name: "Calderra Republic",
+    government: "Republic",
+    personality: { aggression: 0.45, diplomacy: 0.5, economicFocus: 0.5, isolationism: 0.3, opportunism: 0.4 },
+    geography: {
+      terrain: { mountains: 0.25, plains: 0.55, coastal: 0 },
+      climate: "Temperate",
+      hasRiver: true,
+      riverAccess: 0.5,
+      // Calderra: the inland crossroads — modest freshwater and minerals,
+      // but weak fossil-energy endowment of its own, so its trade leans as
+      // hard on energy imports as it does on its land routes.
+      baseResources: {
+        fertility: 0.55, mineralWealth: 0.45, energyPotential: 0.55,
+        oilReserves: 0.15, gasReserves: 0.15, coalDeposits: 0.4,
+        uraniumDeposits: 0.3, rareEarthDeposits: 0.25, freshwaterAvailability: 0.55,
+      },
+      disasterExposureBase: 0.3,
+      // The continent's inland crossroads — borders five nations, none of
+      // them coastal, so its trade leans entirely on land routes.
+      neighbors: ["valtoria", "norrvik", "tesqua", "ombrisk", "fenwold"],
+    },
+    startPop: 33_000_000,
+    startGdpPerCapita: 1050,
+  },
+  {
+    id: "ombrisk",
+    name: "Ombrisk Technocracy",
+    government: "Technocracy",
+    personality: { aggression: 0.15, diplomacy: 0.6, economicFocus: 0.9, isolationism: 0.4, opportunism: 0.25 },
+    geography: {
+      terrain: { mountains: 0.15, plains: 0.40, coastal: 0.80 },
+      climate: "Temperate",
+      hasRiver: false,
+      riverAccess: 0.2,
+      // Ombrisk: coastal high-tech nation — decent oil/gas access and, from
+      // its refining/tech base, the strongest rare-earth position on the
+      // continent, but poor coal and thin freshwater.
+      baseResources: {
+        fertility: 0.35, mineralWealth: 0.4, energyPotential: 0.7,
+        oilReserves: 0.5, gasReserves: 0.6, coalDeposits: 0.15,
+        uraniumDeposits: 0.15, rareEarthDeposits: 0.5, freshwaterAvailability: 0.35,
+      },
+      disasterExposureBase: 0.2,
+      neighbors: ["sundara", "calderra", "fenwold"],
+    },
+    startPop: 18_000_000,
+    startGdpPerCapita: 1600,
+  },
+  {
+    id: "fenwold",
+    name: "Fenwold Kingdom",
+    government: "Constitutional Monarchy",
+    personality: { aggression: 0.2, diplomacy: 0.45, economicFocus: 0.4, isolationism: 0.6, opportunism: 0.2 },
+    geography: {
+      terrain: { mountains: 0.20, plains: 0.60, coastal: 0.55 },
+      climate: "Temperate",
+      hasRiver: true,
+      riverAccess: 0.7,
+      // Fenwold: another river-agrarian kingdom — strong freshwater and
+      // fertility, but next to nothing in energy or hard minerals.
+      baseResources: {
+        fertility: 0.75, mineralWealth: 0.35, energyPotential: 0.35,
+        oilReserves: 0.1, gasReserves: 0.15, coalDeposits: 0.2,
+        uraniumDeposits: 0.1, rareEarthDeposits: 0.1, freshwaterAvailability: 0.8,
+      },
+      disasterExposureBase: 0.25,
+      neighbors: ["norrvik", "calderra", "ombrisk"],
+    },
+    startPop: 25_000_000,
+    startGdpPerCapita: 800,
+  },
+];
+
+function createNewWorld() {
+  const world = new World();
+  for (const cfg of STARTING_NATIONS) {
+    world.countries.set(cfg.id, new Country(cfg));
+  }
+  // Borders are authored one-directionally in STARTING_NATIONS; make the
+  // adjacency graph symmetric before anything (trade, combat, AI) reads it.
+  GeographySystem.normalizeBorders(world);
+  // Every nation starts under a founding leader with their own rolled
+  // personality (see LeadershipSystem).
+  for (const country of world.countryList()) {
+    LeadershipSystem.initCountry(world, country);
+  }
+  // Initialize baseline relations at 0 (implicit via Map default) and log genesis.
+  HistorySystem.log(world, {
+    type: "world_created",
+    description: `A new world begins with ${STARTING_NATIONS.length} nations.`,
+    data: { nations: STARTING_NATIONS.map((n) => n.id) },
+  });
+  return world;
+}
+
+// ---------------------------------------------------------------------------
+// Serialization — for Firestore persistence (or any storage backend).
+// ---------------------------------------------------------------------------
+const SaveSystem = {
+  serialize(world) {
+    const countries = {};
+    for (const [id, c] of world.countries.entries()) {
+      countries[id] = {
+        id: c.id,
+        name: c.name,
+        government: c.government,
+        personality: c.personality,
+        geography: c.geography,
+        population: c.population,
+        economy: c.economy,
+        military: c.military,
+        technology: c.technology,
+        diplomacy: {
+          relations: Array.from(c.diplomacy.relations.entries()),
+          treaties: c.diplomacy.treaties,
+          atWarWith: Array.from(c.diplomacy.atWarWith),
+          warExhaustion: c.diplomacy.warExhaustion,
+          tradeVolumes: Array.from(c.diplomacy.tradeVolumes.entries()),
+          tradeFlows: Array.from(c.diplomacy.tradeFlows.entries()),
+          sanctions: Array.from(c.diplomacy.sanctions.entries()),
+          sanctionedBy: Array.from(c.diplomacy.sanctionedBy.entries()),
+        },
+        history: c.history,
+        alive: c.alive,
+        leader: c.leader,
+        leadershipHistory: c.leadershipHistory,
+      };
+    }
+    return {
+      version: 6,
+      date: world.date,
+      tick: world.tick,
+      globalHistory: world.globalHistory,
+      wars: Array.from(world.wars.entries()),
+      countries,
+      savedAt: Date.now(),
+    };
+  },
+
+  deserialize(data) {
+    // Version 1 (pre-Phase-2) saves have flat geography fields and no
+    // tradeVolumes; version 2 has tradeVolumes but no per-commodity
+    // tradeFlows/goods resource/tradeBalance (pre-trade-network); version 3
+    // has the trade network but only the lumped food/energy/minerals raw
+    // resources (pre-named-resources); version 4 predates the leadership
+    // subsystem entirely (no leader/leadershipHistory field at all); version
+    // 5 predates sanctions (no sanctions/sanctionedBy maps) and defense
+    // pacts (a treaty type string, so no migration is needed for that part —
+    // old treaty arrays simply never contain one). Country's constructor and
+    // the fallback below handle all five migrations so old saves keep
+    // loading instead of erroring out.
+    const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6];
+    if (!data || !SUPPORTED_VERSIONS.includes(data.version)) {
+      throw new Error("Unsupported or missing save data version.");
+    }
+    const world = new World();
+    world.date = data.date;
+    world.tick = data.tick;
+    world.globalHistory = data.globalHistory ?? [];
+    world.wars = new Map(data.wars ?? []);
+
+    for (const id of Object.keys(data.countries)) {
+      const cd = data.countries[id];
+      const country = new Country({
+        id: cd.id,
+        name: cd.name,
+        government: cd.government,
+        personality: cd.personality,
+        geography: cd.geography,
+        startPop: cd.population.total,
+        startGdpPerCapita: cd.economy.gdpPerCapita,
+      });
+      country.population = cd.population;
+      // Pre-governance-subsystem saves won't have suppressedPressure — back
+      // it in at zero so PopulationSystem has somewhere real to read/write.
+      if (country.population.suppressedPressure == null) {
+        country.population.suppressedPressure = 0;
+      }
+      country.economy = cd.economy;
+      // Pre-trade-network saves (version 1/2) won't have the manufactured
+      // "goods" resource or a tradeBalance summary — backfill both so
+      // TradeSystem has somewhere real to read/write from the first tick.
+      if (!country.economy.resources.goods) {
+        country.economy.resources.goods = { stock: 300, production: 0, consumption: 0 };
+      }
+      if (!country.economy.tradeBalance) {
+        country.economy.tradeBalance = { exports: 0, imports: 0, net: 0 };
+      }
+      // Version <= 3 saves predate the named-resource split: they have a
+      // lumped "energy" and "minerals" stock but no water/oil/naturalGas/
+      // coal/uranium/rareEarths. Backfill each missing named resource with
+      // a real starting stock (matching a fresh Country's defaults) rather
+      // than leaving it undefined — the old lumped fields are simply left
+      // in place, unused, rather than deleted, so nothing else that might
+      // reference them breaks.
+      const R = country.economy.resources;
+      if (!R.water) R.water = { stock: 1000, production: 0, consumption: 0 };
+      if (!R.oil) R.oil = { stock: 400, production: 0, consumption: 0 };
+      if (!R.naturalGas) R.naturalGas = { stock: 400, production: 0, consumption: 0 };
+      if (!R.coal) R.coal = { stock: 600, production: 0, consumption: 0 };
+      if (!R.uranium) R.uranium = { stock: 150, production: 0, consumption: 0 };
+      if (!R.rareEarths) R.rareEarths = { stock: 80, production: 0, consumption: 0 };
+      country.military = cd.military;
+      country.technology = cd.technology;
+      country.diplomacy.relations = new Map(cd.diplomacy.relations);
+      country.diplomacy.treaties = cd.diplomacy.treaties;
+      country.diplomacy.atWarWith = new Set(cd.diplomacy.atWarWith);
+      country.diplomacy.warExhaustion = cd.diplomacy.warExhaustion;
+      country.diplomacy.tradeVolumes = new Map(cd.diplomacy.tradeVolumes ?? []);
+      country.diplomacy.tradeFlows = new Map(cd.diplomacy.tradeFlows ?? []);
+      // Version <= 5 saves predate sanctions entirely — backfill empty maps
+      // rather than leaving them undefined so every downstream system
+      // (tickCountry drag, TradeSystem efficiency check, GDP penalty) has
+      // somewhere real to read/write from the first tick after loading.
+      country.diplomacy.sanctions = new Map(cd.diplomacy.sanctions ?? []);
+      country.diplomacy.sanctionedBy = new Map(cd.diplomacy.sanctionedBy ?? []);
+      country.history = cd.history ?? [];
+      country.alive = cd.alive;
+      // Version <= 4 saves predate the leadership subsystem — LeadershipSystem
+      // .initCountry backfills a fresh founding leader for them below rather
+      // than leaving country.leader null.
+      country.leader = cd.leader ?? null;
+      country.leadershipHistory = cd.leadershipHistory ?? [];
+      world.countries.set(id, country);
+    }
+    for (const country of world.countryList()) {
+      LeadershipSystem.initCountry(world, country);
+    }
+    return world;
+  },
+};
+
+// =============================================================================
+// Application state
+// =============================================================================
+let world = null;
+let running = false;
+let tickTimer = null;
+let tickIntervalMs = 800;
+let selectedCountryId = null;
+let currentUser = null;
+
+const el = (id) => document.getElementById(id);
+
+// =============================================================================
+// Auth screen wiring
+// =============================================================================
+el("btn-signup").addEventListener("click", async () => {
+  if (!requireFirebase()) return;
+  const email = el("email").value.trim();
+  const password = el("password").value;
+  try {
+    await fb.createUserWithEmailAndPassword(auth, email, password);
+  } catch (e) {
+    setAuthStatus(e.message, true);
+  }
+});
+
+el("btn-login").addEventListener("click", async () => {
+  if (!requireFirebase()) return;
+  const email = el("email").value.trim();
+  const password = el("password").value;
+  try {
+    await fb.signInWithEmailAndPassword(auth, email, password);
+  } catch (e) {
+    setAuthStatus(e.message, true);
+  }
+});
+
+el("btn-anon").addEventListener("click", async () => {
+  if (!FIREBASE_IS_CONFIGURED || !auth) {
+    // No backend available: run a local, unsaved session so the simulation
+    // itself is never gated behind Firebase setup.
+    currentUser = null;
+    el("auth-screen").style.display = "none";
+    el("game-screen").classList.add("active");
+    el("user-label").textContent = "Local session (unsaved)";
+    world = createNewWorld();
+    renderAll();
+    return;
+  }
+  try {
+    await fb.signInAnonymously(auth);
+  } catch (e) {
+    setAuthStatus(e.message, true);
+  }
+});
+
+el("btn-signout").addEventListener("click", async () => {
+  stopSimulation();
+  if (auth) {
+    try { await fb.signOut(auth); } catch (e) { /* ignore */ }
+  } else {
+    onSignedOut();
+  }
+});
+
+function requireFirebase() {
+  if (!FIREBASE_IS_CONFIGURED || !auth) {
+    setAuthStatus(
+      "Firebase is not configured in this deployment. Add your project credentials to FIREBASE_CONFIG to enable accounts and saving.",
+      true
+    );
+    return false;
+  }
+  return true;
+}
+
+function setAuthStatus(msg, isError = false) {
+  const node = el("auth-status");
+  node.textContent = msg;
+  node.className = isError ? "bad" : "muted";
+}
+
+function onSignedIn(user) {
+  currentUser = user;
+  el("auth-screen").style.display = "none";
+  el("game-screen").classList.add("active");
+  el("user-label").textContent = user.isAnonymous ? "Guest" : (user.email || "Signed in");
+  // Attempt to auto-load an existing save; otherwise start a fresh world so
+  // the simulation is never left in an empty, non-functional state.
+  attemptAutoLoad();
+}
+
+function onSignedOut() {
+  currentUser = null;
+  world = null;
+  el("game-screen").classList.remove("active");
+  el("auth-screen").style.display = "block";
+  setAuthStatus("");
+}
+
+// =============================================================================
+// Game controls
+// =============================================================================
+el("btn-play").addEventListener("click", () => startSimulation());
+el("btn-pause").addEventListener("click", () => stopSimulation());
+el("speed-select").addEventListener("change", (e) => {
+  tickIntervalMs = parseInt(e.target.value, 10);
+  if (running) { stopSimulation(); startSimulation(); }
+});
+el("btn-newgame").addEventListener("click", () => {
+  if (!confirm("Start a new world? This discards the current world unless you've saved it.")) return;
+  stopSimulation();
+  world = createNewWorld();
+  selectedCountryId = null;
+  renderAll();
+});
+el("btn-save").addEventListener("click", () => saveWorld());
+el("btn-load").addEventListener("click", () => loadWorld());
+
+function startSimulation() {
+  if (!world || running) return;
+  running = true;
+  tickTimer = setInterval(() => {
+    SimulationClock.tick(world);
+    renderAll();
+  }, tickIntervalMs);
+}
+
+function stopSimulation() {
+  running = false;
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+
+// =============================================================================
+// Persistence (Firestore)
+// =============================================================================
+function saveDocRef() {
+  if (!db || !currentUser) return null;
+  return fb.doc(db, "users", currentUser.uid, "worldsave", "current");
+}
+
+async function saveWorld() {
+  if (!world) return;
+  const ref = saveDocRef();
+  if (!ref) {
+    el("save-status").textContent = "Save unavailable (Firebase not configured).";
+    el("save-status").className = "warn";
+    return;
+  }
+  el("save-status").textContent = "Saving...";
+  el("save-status").className = "muted";
+  try {
+    const data = SaveSystem.serialize(world);
+    // Firestore documents are capped at ~1MB; history is the main growth
+    // vector, so trim what's persisted while keeping it substantial and
+    // keeping the in-memory session history intact.
+    const trimmed = {
+      ...data,
+      globalHistory: data.globalHistory.slice(-1500),
+      countries: Object.fromEntries(
+        Object.entries(data.countries).map(([id, c]) => [
+          id,
+          { ...c, history: c.history.slice(-300) },
+        ])
+      ),
+    };
+    await fb.setDoc(ref, trimmed);
+    el("save-status").textContent = `Saved at ${new Date().toLocaleTimeString()}`;
+    el("save-status").className = "good";
+  } catch (e) {
+    el("save-status").textContent = `Save failed: ${e.message}`;
+    el("save-status").className = "bad";
+  }
+}
+
+async function loadWorld() {
+  const ref = saveDocRef();
+  if (!ref) {
+    el("save-status").textContent = "Load unavailable (Firebase not configured).";
+    el("save-status").className = "warn";
+    return;
+  }
+  el("save-status").textContent = "Loading...";
+  try {
+    const snap = await fb.getDoc(ref);
+    if (!snap.exists()) {
+      el("save-status").textContent = "No saved world found.";
+      el("save-status").className = "warn";
+      return;
+    }
+    stopSimulation();
+    world = SaveSystem.deserialize(snap.data());
+    selectedCountryId = null;
+    renderAll();
+    el("save-status").textContent = "Loaded.";
+    el("save-status").className = "good";
+  } catch (e) {
+    el("save-status").textContent = `Load failed: ${e.message}`;
+    el("save-status").className = "bad";
+  }
+}
+
+async function attemptAutoLoad() {
+  const ref = saveDocRef();
+  if (ref) {
+    try {
+      const snap = await fb.getDoc(ref);
+      if (snap.exists()) {
+        world = SaveSystem.deserialize(snap.data());
+        renderAll();
+        return;
+      }
+    } catch (e) {
+      // fall through to a fresh world if the read fails for any reason
+    }
+  }
+  world = createNewWorld();
+  renderAll();
+}
+
+// =============================================================================
+// Rendering
+// =============================================================================
+function renderAll() {
+  if (!world) return;
+  el("date-display").textContent = `${world.date.year}-${String(world.date.month).padStart(2, "0")}  (tick ${world.tick})`;
+  renderCountryTable();
+  renderDetail();
+  renderHistory();
+}
+
+function fmtInt(n) { return Math.round(n).toLocaleString(); }
+function fmtMoney(n) {
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  return Math.round(n).toLocaleString();
+}
+
+function renderCountryTable() {
+  const tbody = el("country-table-body");
+  tbody.innerHTML = "";
+  const countries = world.countryList().sort((a, b) => b.economy.gdp - a.economy.gdp);
+  for (const c of countries) {
+    const tr = document.createElement("tr");
+    tr.className = "selectable" + (c.id === selectedCountryId ? " selected" : "");
+    tr.addEventListener("click", () => { selectedCountryId = c.id; renderDetail(); renderCountryTable(); });
+
+    const statusBits = [];
+    if (c.diplomacy.atWarWith.size > 0) statusBits.push(`<span class="bad">at war (${c.diplomacy.atWarWith.size})</span>`);
+    if (c.diplomacy.sanctionedBy.size > 0) statusBits.push(`<span class="warn">sanctioned (${c.diplomacy.sanctionedBy.size})</span>`);
+    if (c.population.unrest > 70) statusBits.push(`<span class="warn">unrest</span>`);
+    if (statusBits.length === 0) statusBits.push('<span class="good">stable</span>');
+
+    tr.innerHTML = `
+      <td>${c.name}</td>
+      <td class="muted">${c.government}</td>
+      <td>${c.leader ? `${c.leader.name} <span class="muted">(${LEADER_ARCHETYPES[c.leader.archetype]?.title ?? c.leader.archetype})</span>` : `<span class="muted">—</span>`}</td>
+      <td>${fmtInt(c.population.total)}</td>
+      <td>${fmtMoney(c.economy.gdpPerCapita)}</td>
+      <td>${c.population.stability.toFixed(0)}</td>
+      <td>${c.population.unrest.toFixed(0)}</td>
+      <td>${fmtInt(c.military.strength)}</td>
+      <td>${statusBits.join(" ")}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function bar(value, max = 100) {
+  const pct = clamp((value / max) * 100, 0, 100);
+  return `<div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>`;
+}
+
+function renderDetail() {
+  const node = el("detail-content");
+  if (!selectedCountryId || !world.get(selectedCountryId)) {
+    node.innerHTML = `<span class="muted">Select a nation from the table.</span>`;
+    return;
+  }
+  const c = world.get(selectedCountryId);
+  const geoMods = GeographySystem.getModifiers(c);
+  const relations = Array.from(c.diplomacy.relations.entries())
+    .filter(([id]) => world.get(id))
+    .sort((a, b) => b[1] - a[1]);
+
+  const treatiesHtml = c.diplomacy.treaties.length
+    ? c.diplomacy.treaties.map(t => `<div>${t.type} — ${world.get(t.withId)?.name ?? t.withId}</div>`).join("")
+    : `<span class="muted">None</span>`;
+
+  const warsHtml = c.diplomacy.atWarWith.size
+    ? Array.from(c.diplomacy.atWarWith).map(id => `<div class="bad">War with ${world.get(id)?.name ?? id}</div>`).join("")
+    : `<span class="muted">At peace</span>`;
+
+  const sanctionsImposedHtml = c.diplomacy.sanctions.size
+    ? Array.from(c.diplomacy.sanctions.entries()).map(([id, rec]) =>
+        `<div class="warn">Sanctioning ${world.get(id)?.name ?? id} <span class="muted">(${rec.reason})</span></div>`
+      ).join("")
+    : `<span class="muted">None imposed</span>`;
+  const sanctionsAgainstHtml = c.diplomacy.sanctionedBy.size
+    ? Array.from(c.diplomacy.sanctionedBy.entries()).map(([id, rec]) =>
+        `<div class="bad">Sanctioned by ${world.get(id)?.name ?? id} <span class="muted">(${rec.reason})</span></div>`
+      ).join("")
+    : `<span class="muted">None</span>`;
+
+  const leaderHtml = (() => {
+    if (!c.leader) return `<span class="muted">No leader on record</span>`;
+    const arch = LEADER_ARCHETYPES[c.leader.archetype];
+    const t = c.leader.traits;
+    const yearsInPower = ((world.tick - c.leader.tookPowerTick) / CONFIG.TICKS_PER_YEAR).toFixed(1);
+    const traitRow = (label, v) => `<div class="k">${label}</div>${bar(v * 100)}`;
+    const priorHtml = c.leadershipHistory && c.leadershipHistory.length
+      ? c.leadershipHistory.slice(-5).reverse().map(l =>
+          `<div class="muted">${l.name} (${LEADER_ARCHETYPES[l.archetype]?.title ?? l.archetype}) — ${l.leftReason}</div>`
+        ).join("")
+      : `<span class="muted">No prior leaders on record</span>`;
+    return `
+      <div class="stat-grid">
+        <div class="k">Name</div><div>${c.leader.name}</div>
+        <div class="k">Archetype</div><div>${arch?.title ?? c.leader.archetype}</div>
+        <div class="k">Age</div><div>${c.leader.age}</div>
+        <div class="k">Years in power</div><div>${yearsInPower}</div>
+      </div>
+      <div class="muted" style="margin:4px 0 8px;">${arch?.description ?? ""}</div>
+      <div class="k">Public approval</div>${bar(c.leader.approval)}
+      <div class="stat-grid" style="margin-top:8px;">
+        ${traitRow("Boldness", t.boldness)}
+        ${traitRow("Caution", t.caution)}
+        ${traitRow("Pragmatism", t.pragmatism)}
+        ${traitRow("Ideology", t.ideology)}
+        ${traitRow("Ruthlessness", t.ruthlessness)}
+        ${traitRow("Charisma", t.charisma)}
+      </div>
+      <h4 style="margin:10px 0 4px;">Past Leaders</h4>
+      ${priorHtml}
+    `;
+  })();
+
+  node.innerHTML = `
+    <h2>${c.name}</h2>
+    <div class="muted">${c.government} — Doctrine: ${c.military.doctrine}</div>
+    <div class="muted" style="margin-bottom:6px;">${govProfile(c.government).description}</div>
+    <div class="k" style="margin-bottom:10px;">Suppressed pressure</div>${bar(c.population.suppressedPressure)}
+
+    <h3>Leadership</h3>
+    ${leaderHtml}
+
+    <h3>Population</h3>
+    <div class="stat-grid">
+      <div class="k">Total</div><div>${fmtInt(c.population.total)}</div>
+      <div class="k">Growth</div><div>${c.population.growthRatePct.toFixed(2)}%/yr</div>
+      <div class="k">Employment</div><div>${c.population.employmentRatePct.toFixed(1)}%</div>
+      <div class="k">Education</div><div>${c.population.educationLevel.toFixed(1)}</div>
+    </div>
+    <div class="k">Stability</div>${bar(c.population.stability)}
+    <div class="k" style="margin-top:4px;">Unrest</div>${bar(c.population.unrest)}
+
+    <h3 style="margin-top:12px;">Economy</h3>
+    <div class="stat-grid">
+      <div class="k">GDP</div><div>${fmtMoney(c.economy.gdp)}</div>
+      <div class="k">GDP/capita</div><div>${fmtMoney(c.economy.gdpPerCapita)}</div>
+      <div class="k">Growth</div><div>${c.economy.lastGdpGrowthPct.toFixed(2)}%</div>
+      <div class="k">Treasury</div><div>${fmtMoney(c.economy.treasury)}</div>
+      <div class="k">Debt</div><div>${fmtMoney(c.economy.debt)}</div>
+      <div class="k">Tax rate</div><div>${c.economy.taxRatePct.toFixed(0)}%</div>
+    </div>
+    <div class="stat-grid">
+      <div class="k">Military budget</div><div>${(c.economy.budget.military*100).toFixed(0)}%</div>
+      <div class="k">Research budget</div><div>${(c.economy.budget.research*100).toFixed(0)}%</div>
+      <div class="k">Infrastructure</div><div>${(c.economy.budget.infrastructure*100).toFixed(0)}%</div>
+      <div class="k">Welfare</div><div>${(c.economy.budget.welfare*100).toFixed(0)}%</div>
+    </div>
+    <h3 style="margin-top:12px;">Resources</h3>
+    <div class="stat-grid">
+      <div class="k">Food stock</div><div>${fmtInt(c.economy.resources.food.stock)}</div>
+      <div class="k">Water stock</div><div>${fmtInt(c.economy.resources.water.stock)}</div>
+      <div class="k">Oil stock</div><div>${fmtInt(c.economy.resources.oil.stock)}</div>
+      <div class="k">Natural gas stock</div><div>${fmtInt(c.economy.resources.naturalGas.stock)}</div>
+      <div class="k">Coal stock</div><div>${fmtInt(c.economy.resources.coal.stock)}</div>
+      <div class="k">Uranium stock</div><div>${fmtInt(c.economy.resources.uranium.stock)}</div>
+      <div class="k">Rare earths stock</div><div>${fmtInt(c.economy.resources.rareEarths.stock)}</div>
+      <div class="k">Industry output</div><div>${fmtInt(c.economy.resources.industry.output)}</div>
+      <div class="k">Manufactured goods</div><div>${fmtInt(c.economy.resources.goods.stock)}</div>
+    </div>
+
+    <h3 style="margin-top:12px;">Military</h3>
+    <div class="stat-grid">
+      <div class="k">Strength score</div><div>${fmtInt(c.military.strength)}</div>
+      <div class="k">Manpower</div><div>${fmtInt(c.military.manpower)}</div>
+      <div class="k">Equipment quality</div><div>${c.military.equipmentQuality.toFixed(1)}</div>
+      <div class="k">Morale</div><div>${c.military.morale.toFixed(1)}</div>
+      <div class="k">Infantry</div><div>${fmtInt(c.military.units.infantry)}</div>
+      <div class="k">Armor</div><div>${fmtInt(c.military.units.armor)}</div>
+      <div class="k">Navy</div><div>${fmtInt(c.military.units.navy)}</div>
+      <div class="k">Air Force</div><div>${fmtInt(c.military.units.airforce)}</div>
+    </div>
+
+    <h3 style="margin-top:12px;">Technology</h3>
+    <div class="stat-grid">
+      <div class="k">Military</div><div>${c.technology.levels.military.toFixed(1)} / 100</div>
+      <div class="k">Economic</div><div>${c.technology.levels.economic.toFixed(1)} / 100</div>
+      <div class="k">Industrial</div><div>${c.technology.levels.industrial.toFixed(1)} / 100</div>
+      <div class="k">Medical</div><div>${c.technology.levels.medical.toFixed(1)} / 100</div>
+    </div>
+
+    <h3 style="margin-top:12px;">Geography</h3>
+    <div class="stat-grid">
+      <div class="k">Climate</div><div>${c.geography.climate}</div>
+      <div class="k">Terrain</div><div>${(c.geography.terrain.mountains*100).toFixed(0)}% mountains, ${(c.geography.terrain.plains*100).toFixed(0)}% plains</div>
+      <div class="k">Coastal access</div><div>${c.geography.terrain.coastal > 0 ? (c.geography.terrain.coastal*100).toFixed(0)+"%" : "Landlocked"}</div>
+      <div class="k">River network</div><div>${c.geography.hasRiver ? `Yes (${(c.geography.riverAccess*100).toFixed(0)}% access)` : "None"}</div>
+      <div class="k">Disaster exposure</div><div>${(geoMods.disasterExposure*100).toFixed(0)}%</div>
+      <div class="k">Land borders</div><div>${c.geography.neighbors.map(id => world.get(id)?.name ?? id).join(", ") || "None"}</div>
+    </div>
+
+    <h3 style="margin-top:12px;">Trade Network</h3>
+    <div class="stat-grid">
+      <div class="k">Exports</div><div class="good">${fmtMoney(c.economy.tradeBalance?.exports ?? 0)}/mo</div>
+      <div class="k">Imports</div><div class="bad">${fmtMoney(c.economy.tradeBalance?.imports ?? 0)}/mo</div>
+      <div class="k">Trade balance</div><div class="${(c.economy.tradeBalance?.net ?? 0) >= 0 ? 'good' : 'bad'}">${(c.economy.tradeBalance?.net ?? 0) >= 0 ? '+' : ''}${fmtMoney(c.economy.tradeBalance?.net ?? 0)}/mo</div>
+    </div>
+    <div class="relation-list">
+      ${
+        c.diplomacy.treaties.filter(t => t.type === "trade").length
+          ? c.diplomacy.treaties.filter(t => t.type === "trade").map(t => {
+              const partner = world.get(t.withId);
+              const flow = c.diplomacy.tradeFlows.get(t.withId);
+              const route = flow?.route ?? (partner ? GeographySystem.tradeRoute(c, partner) : { viable: false });
+              const partnerName = partner?.name ?? t.withId;
+
+              if (!flow || flow.active === false) {
+                const reason = flow?.disruptedReason === "war" ? "at war — trade halted"
+                  : flow?.disruptedReason === "no route" ? "no viable route"
+                  : "no route";
+                return `<div class="bad" style="padding:3px 0;">${partnerName} — ${reason}</div>`;
+              }
+
+              const exportsList = COMMODITY_KEYS
+                .filter(k => flow.exports[k] > 0)
+                .map(k => `${TRADE_GOODS[k].label.split(" (")[0]} ${fmtInt(flow.exports[k])}`)
+                .join(", ") || "—";
+              const importsList = COMMODITY_KEYS
+                .filter(k => flow.imports[k] > 0)
+                .map(k => `${TRADE_GOODS[k].label.split(" (")[0]} ${fmtInt(flow.imports[k])}`)
+                .join(", ") || "—";
+
+              return `
+                <div style="padding:4px 0; border-bottom:1px dotted var(--border);">
+                  <div><strong>${partnerName}</strong> <span class="muted">(${route.type} route, ${(route.efficiency*100).toFixed(0)}% efficiency)</span></div>
+                  <div class="muted">↑ exports: <span class="good">${exportsList}</span></div>
+                  <div class="muted">↓ imports: <span class="warn">${importsList}</span></div>
+                </div>`;
+            }).join("")
+          : `<span class="muted">No trade agreements</span>`
+      }
+    </div>
+
+    <h3 style="margin-top:12px;">Diplomacy</h3>
+    <div class="relation-list">
+      ${relations.map(([id, val]) => `<div><span>${world.get(id)?.name ?? id}</span><span class="${val>0?'good':val<0?'bad':'muted'}">${val.toFixed(0)}</span></div>`).join("")}
+    </div>
+    <h3 style="margin-top:8px;">Treaties</h3>
+    ${treatiesHtml}
+    <h3 style="margin-top:8px;">Sanctions Imposed</h3>
+    ${sanctionsImposedHtml}
+    <h3 style="margin-top:8px;">Sanctioned By</h3>
+    ${sanctionsAgainstHtml}
+    <h3 style="margin-top:8px;">Active Conflicts</h3>
+    ${warsHtml}
+  `;
+}
+
+function renderHistory() {
+  const node = el("history-log");
+  const recent = world.globalHistory.slice(-150).reverse();
+  node.innerHTML = recent.map(e => {
+    const dateStr = `${e.date.year}-${String(e.date.month).padStart(2, "0")}`;
+    return `<div class="log-entry"><span class="muted">${dateStr}</span> <span class="log-tag">${e.type}</span>${e.description}</div>`;
+  }).join("");
+}
+
+// =============================================================================
+// Boot
+// =============================================================================
+initFirebase().then(() => {
+  if (!FIREBASE_IS_CONFIGURED) {
+    setAuthStatus("Running without Firebase — sign-in and saving are disabled, but you can still run a local world.", false);
+    el("btn-anon").textContent = "Continue Locally (no save)";
+  }
+});
+</script>
+</body>
+</html>
